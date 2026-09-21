@@ -1,0 +1,102 @@
+{
+  "enabled": {
+    "description": "启用插件",
+    "type": "bool",
+    "default": true,
+    "hint": "总开关，关闭后停止所有监控与分析"
+  },
+  "provider_id": {
+    "description": "LLM 服务商",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "留空则使用当前会话的默认服务商"
+  },
+  "monitor_mode": {
+    "description": "监控模式",
+    "type": "string",
+    "options": ["whitelist", "blacklist", "all"],
+    "default": "whitelist",
+    "hint": "whitelist=只监控名单中的群/人, blacklist=排除名单中的群/人, all=监控全部"
+  },
+  "monitored_groups": {
+    "description": "群组名单",
+    "type": "list",
+    "default": [],
+    "hint": "填写群组ID或完整会话ID（可在群内发送 /sid 获取）"
+  },
+  "monitored_users": {
+    "description": "用户名单",
+    "type": "list",
+    "default": [],
+    "hint": "填写用户ID，可与群组名单搭配使用"
+  },
+  "excluded_users": {
+    "description": "排除用户",
+    "type": "list",
+    "default": [],
+    "hint": "这些用户的消息永远不会被分析，优先级最高"
+  },
+  "analysis_mode": {
+    "description": "分析模式",
+    "type": "string",
+    "options": ["quick", "standard", "detailed"],
+    "default": "standard",
+    "hint": "quick=简要快速分析, standard=标准概率分析, detailed=详细深度分析"
+  },
+  "enable_intent_analysis": {
+    "description": "意图解读",
+    "type": "bool",
+    "default": true,
+    "hint": "分析对方话语的表面含义与真实意图，并给出概率评估"
+  },
+  "enable_emotion_detection": {
+    "description": "情绪检测",
+    "type": "bool",
+    "default": true,
+    "hint": "识别对方当前情绪状态、强度与变化趋势"
+  },
+  "enable_danger_assessment": {
+    "description": "风险评估",
+    "type": "bool",
+    "default": true,
+    "hint": "评估对话风险等级 (1-10)，高等级时发出紧急提醒"
+  },
+  "enable_action_advice": {
+    "description": "行动建议",
+    "type": "bool",
+    "default": true,
+    "hint": "提供推荐回应策略及成功率评估"
+  },
+  "danger_threshold": {
+    "description": "危险警报阈值",
+    "type": "int",
+    "default": 7,
+    "hint": "风险等级达到此值时附加紧急提醒（建议 6-8）"
+  },
+  "context_message_count": {
+    "description": "上下文消息数",
+    "type": "int",
+    "default": 10,
+    "hint": "分析时参考的历史消息条数，范围 1-50"
+  },
+  "cooldown_seconds": {
+    "description": "分析冷却（秒）",
+    "type": "int",
+    "default": 30,
+    "hint": "同一会话内两次分析的最小间隔，防止频繁调用 LLM"
+  },
+  "response_mode": {
+    "description": "回复模式",
+    "type": "string",
+    "options": ["reply", "private"],
+    "default": "reply",
+    "hint": "reply=在原会话中回复, private=私聊发送给触发者（更隐蔽）"
+  },
+  "custom_system_prompt": {
+    "description": "自定义分析提示词",
+    "type": "text",
+    "default": "",
+    "hint": "留空使用内置提示词，填写后会追加到内置提示词之后，可用于定制分析风格"
+  }
+}
