@@ -5,10 +5,12 @@ AstrBot 聊天助手插件 - 智能对话分析与建议
 - 实时分析对话对象的消息意图、情绪和风险
 - 提供概率评估和回应策略建议
 - 支持群聊和私聊场景
-- 可配置监控白名单/黑名单
-- 可独立开关各分析维度
+- 群聊/用户独立白名单/黑名单监控
+- 4个独立分析维度开关
 - 冷却机制防止 LLM 过度调用
 - 支持回复模式和私聊模式
+- 超管/普通用户分权控制
+- 按群-用户维度细粒度权限管理
 
 灵感来源: 网络流传的"Jev"AI 对话分析助手概念图
 """
@@ -84,6 +86,53 @@ MODE_INSTRUCTIONS = {
 }
 
 
+# ==================== 权限辅助 ====================
+
+
+def _parse_permission_list(config: AstrBotConfig, key: str) -> list[dict]:
+    """从配置解析 template_list 为 dict 列表。"""
+    raw = config.get(key, [])
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
+def _is_admin(sender_id: str, admin_users: set) -> bool:
+    """判断是否为超管。"""
+    return sender_id in admin_users
+
+
+def _check_entry_permission(
+    entries: list[dict], group_id: str, sender_id: str
+) -> bool:
+    """
+    检查 sender_id 是否对 group_id 有命令设置权限。
+    匹配规则：条目 (group_id, user_id) 与请求匹配，且 can_set=True。
+    """
+    for entry in entries:
+        entry_group = entry.get("group_id", "")
+        entry_user = entry.get("user_id", "")
+        can_set = entry.get("can_set", False)
+        # group_id 为空表示全局
+        if entry_group and entry_group != group_id:
+            continue
+        if entry_user and entry_user != sender_id:
+            continue
+        if can_set:
+            return True
+    return False
+
+
+def _get_group_mode(entries: list[dict], group_id: str) -> str | None:
+    """获取指定群的自定义分析模式，未设置返回 None。"""
+    for entry in entries:
+        if entry.get("group_id") == group_id:
+            mode = entry.get("mode", "")
+            if mode in MODE_INSTRUCTIONS:
+                return mode
+    return None
+
+
 # ==================== 插件主类 ====================
 
 
@@ -98,44 +147,176 @@ class ChatHelperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-
-        # -------- 基础配置 --------
-        self.enabled: bool = config.get("enabled", True)
-        self.provider_id: str = config.get("provider_id", "")
-        self.analysis_mode: str = config.get("analysis_mode", "standard")
-
-        # -------- 监控配置 --------
-        self.monitor_mode: str = config.get("monitor_mode", "whitelist")
-        self.monitored_groups: set = set(config.get("monitored_groups", []))
-        self.monitored_users: set = set(config.get("monitored_users", []))
-        self.excluded_users: set = set(config.get("excluded_users", []))
-
-        # -------- 分析配置 --------
-        self.enable_intent: bool = config.get("enable_intent_analysis", True)
-        self.enable_emotion: bool = config.get("enable_emotion_detection", True)
-        self.enable_danger: bool = config.get("enable_danger_assessment", True)
-        self.enable_action: bool = config.get("enable_action_advice", True)
-        self.danger_threshold: int = config.get("danger_threshold", 7)
-        self.context_count: int = max(1, min(50, config.get("context_message_count", 10)))
-
-        # -------- 回复配置 --------
-        self.response_mode: str = config.get("response_mode", "reply")
-        self.cooldown_seconds: int = max(5, config.get("cooldown_seconds", 30))
-
-        # -------- 高级配置 --------
-        self.custom_prompt: str = config.get("custom_system_prompt", "")
+        self._reload_config()
 
         # -------- 内部状态 --------
         self._buffers: dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
         self._last_analysis: dict[str, float] = defaultdict(float)
         self._analysis_count: int = 0
         self._error_count: int = 0
+        # 运行时添加的被分析用户 {group_id: set(user_ids)}
+        self._runtime_analysis_users: dict[str, set] = defaultdict(set)
+        # 运行时修改的群分析模式 {group_id: mode}
+        self._runtime_group_modes: dict[str, str] = {}
 
         logger.info(
             f"[ChatHelper] v{VERSION} 加载完成 | "
-            f"启用={self.enabled} 监控={self.monitor_mode} "
-            f"分析={self.analysis_mode} 冷却={self.cooldown_seconds}s"
+            f"启用={self.enabled} 群监控={self.monitor_groups_mode} "
+            f"用户监控={self.monitor_users_mode} "
+            f"分析={self.default_analysis_mode} 冷却={self.cooldown_seconds}s"
         )
+
+    # ================================================================
+    #  配置加载
+    # ================================================================
+
+    def _reload_config(self):
+        """从 self.config 重新加载所有配置。"""
+        # 基础
+        self.enabled: bool = self.config.get("enabled", True)
+        self.provider_id: str = self.config.get("provider_id", "")
+        self.default_analysis_mode: str = self.config.get("analysis_mode", "standard")
+
+        # 监控范围
+        self.monitor_groups_mode: str = self.config.get("monitor_groups_mode", "whitelist")
+        self.monitored_groups: set = set(self.config.get("monitored_groups", []))
+        self.monitor_users_mode: str = self.config.get("monitor_users_mode", "whitelist")
+        self.monitored_users: set = set(self.config.get("monitored_users", []))
+
+        # 超管
+        self.admin_users: set = set(self.config.get("admin_users", []))
+
+        # 被分析用户配置（群-用户维度）
+        self.analysis_users: list[dict] = _parse_permission_list(
+            self.config, "analysis_users"
+        )
+        # 分析模式配置（群维度）
+        self.analysis_mode_groups: list[dict] = _parse_permission_list(
+            self.config, "analysis_mode_groups"
+        )
+
+        # 权限
+        self.permission_status: str = self.config.get("permission_status", "admin")
+        self.permission_stats: str = self.config.get("permission_stats", "admin")
+
+        # 分析维度
+        self.enable_intent: bool = self.config.get("enable_intent_analysis", True)
+        self.enable_emotion: bool = self.config.get("enable_emotion_detection", True)
+        self.enable_danger: bool = self.config.get("enable_danger_assessment", True)
+        self.enable_action: bool = self.config.get("enable_action_advice", True)
+        self.danger_threshold: int = self.config.get("danger_threshold", 7)
+        self.context_count: int = max(
+            1, min(50, self.config.get("context_message_count", 10))
+        )
+
+        # 分析参数
+        self.response_mode: str = self.config.get("response_mode", "reply")
+        self.cooldown_seconds: int = max(5, self.config.get("cooldown_seconds", 30))
+
+        # 高级
+        self.custom_prompt: str = self.config.get("custom_system_prompt", "")
+
+    # ================================================================
+    #  权限判断
+    # ================================================================
+
+    def _can_use_status(self, sender_id: str) -> bool:
+        """是否有查询状态权限。"""
+        if self.permission_status == "anyone":
+            return True
+        return _is_admin(sender_id, self.admin_users)
+
+    def _can_use_stats(self, sender_id: str) -> bool:
+        """是否有查询统计权限。"""
+        if self.permission_stats == "anyone":
+            return True
+        return _is_admin(sender_id, self.admin_users)
+
+    def _can_manage_analysis_user(
+        self, sender_id: str, group_id: str, target_user_id: str
+    ) -> bool:
+        """是否能设置被分析用户。超管或按配置允许的用户。"""
+        if _is_admin(sender_id, self.admin_users):
+            return True
+        return _check_entry_permission(
+            self.analysis_users, group_id, target_user_id
+        )
+
+    def _can_set_group_mode(self, sender_id: str, group_id: str) -> bool:
+        """是否能设置本群分析模式。超管或按配置允许的群。"""
+        if _is_admin(sender_id, self.admin_users):
+            return True
+        for entry in self.analysis_mode_groups:
+            if entry.get("group_id") == group_id and entry.get("can_set", False):
+                return True
+        return False
+
+    # ================================================================
+    #  监控过滤
+    # ================================================================
+
+    def _should_monitor(self, sender_id: str, group_id: str, session_id: str) -> bool:
+        """综合判断是否需要监控此消息。"""
+        # 群聊维度
+        if group_id:
+            if not self._match_group_monitor(group_id, session_id):
+                return False
+
+        # 用户维度
+        if not self._match_user_monitor(sender_id):
+            return False
+
+        # 被分析用户（静态配置 + 运行时添加）
+        if self._is_analysis_target(sender_id, group_id):
+            return True
+
+        return False
+
+    def _match_group_monitor(self, group_id: str, session_id: str) -> bool:
+        """群聊维度过滤。"""
+        if not self.monitored_groups:
+            # 名单为空：whitelist=不监控，blacklist=全部监控
+            return self.monitor_groups_mode == "blacklist"
+        hit = group_id in self.monitored_groups or session_id in self.monitored_groups
+        return hit if self.monitor_groups_mode == "whitelist" else not hit
+
+    def _match_user_monitor(self, sender_id: str) -> bool:
+        """用户维度过滤。"""
+        if not self.monitored_users:
+            return self.monitor_users_mode == "blacklist"
+        hit = sender_id in self.monitored_users
+        return hit if self.monitor_users_mode == "whitelist" else not hit
+
+    def _is_analysis_target(self, sender_id: str, group_id: str) -> bool:
+        """判断用户是否为被分析目标。"""
+        # 运行时添加的
+        if group_id in self._runtime_analysis_users:
+            if sender_id in self._runtime_analysis_users[group_id]:
+                return True
+        if "" in self._runtime_analysis_users:
+            if sender_id in self._runtime_analysis_users[""]:
+                return True
+
+        # 静态配置的
+        for entry in self.analysis_users:
+            entry_group = entry.get("group_id", "")
+            entry_user = entry.get("user_id", "")
+            if entry_user != sender_id:
+                continue
+            if not entry_group or entry_group == group_id:
+                return True
+        return False
+
+    def _get_effective_analysis_mode(self, group_id: str) -> str:
+        """获取指定群的有效分析模式（运行时 > 静态配置 > 全局默认）。"""
+        # 运行时修改
+        if group_id in self._runtime_group_modes:
+            return self._runtime_group_modes[group_id]
+        # 静态配置
+        mode = _get_group_mode(self.analysis_mode_groups, group_id)
+        if mode:
+            return mode
+        return self.default_analysis_mode
 
     # ================================================================
     #  消息监听
@@ -143,9 +324,7 @@ class ChatHelperPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
-        """
-        监听全部消息，按配置过滤后调用 LLM 进行对话分析。
-        """
+        """监听全部消息，按配置过滤后调用 LLM 进行对话分析。"""
         try:
             if not self.enabled:
                 return
@@ -156,24 +335,19 @@ class ChatHelperPlugin(Star):
             group_id = event.message_obj.group_id or ""
             session_id = event.session_id
 
-            # 跳过空消息
             if not message_str:
                 return
 
-            # 跳过机器人自身消息
             if self._is_self_message(event, sender_id):
                 return
 
-            # 监控范围过滤
             if not self._should_monitor(sender_id, group_id, session_id):
                 return
 
-            # 冷却检查
             now = time.time()
             if now - self._last_analysis[session_id] < self.cooldown_seconds:
                 return
 
-            # 存入消息缓冲
             self._buffers[session_id].append(
                 {
                     "sender_id": sender_id,
@@ -184,17 +358,18 @@ class ChatHelperPlugin(Star):
                 }
             )
 
-            # 执行 LLM 分析
-            analysis = await self._call_llm(event, session_id, sender_name, message_str)
+            # 获取该群有效的分析模式
+            effective_mode = self._get_effective_analysis_mode(group_id)
+            analysis = await self._call_llm(
+                event, session_id, sender_name, message_str, effective_mode
+            )
 
             if analysis:
                 response = self._format_response(sender_name, message_str, analysis)
 
-                # 根据回复模式发送
                 if self.response_mode == "private":
                     success = await self._try_send_private(event, sender_id, response)
                     if not success:
-                        # 私聊失败则回退到会话内回复
                         yield event.plain_result(response)
                 else:
                     yield event.plain_result(response)
@@ -225,53 +400,6 @@ class ChatHelperPlugin(Star):
             pass
         return False
 
-    def _should_monitor(self, sender_id: str, group_id: str, session_id: str) -> bool:
-        """根据监控模式判断是否需要处理此消息"""
-        # 排除列表优先级最高
-        if sender_id in self.excluded_users:
-            return False
-
-        if self.monitor_mode == "all":
-            return True
-
-        if self.monitor_mode == "whitelist":
-            return self._match_whitelist(sender_id, group_id, session_id)
-
-        if self.monitor_mode == "blacklist":
-            return self._match_blacklist(sender_id, group_id, session_id)
-
-        return False
-
-    def _match_whitelist(self, sender_id: str, group_id: str, session_id: str) -> bool:
-        """白名单匹配逻辑：名单中任一条件命中即通过"""
-        # 两个名单都为空 → 不监控
-        if not self.monitored_groups and not self.monitored_users:
-            return False
-
-        # 群组命中
-        if self.monitored_groups:
-            if group_id in self.monitored_groups or session_id in self.monitored_groups:
-                return True
-
-        # 用户命中
-        if self.monitored_users:
-            if sender_id in self.monitored_users:
-                return True
-
-        return False
-
-    def _match_blacklist(self, sender_id: str, group_id: str, session_id: str) -> bool:
-        """黑名单匹配逻辑：命中任一条件即排除"""
-        if self.monitored_groups:
-            if group_id in self.monitored_groups or session_id in self.monitored_groups:
-                return False
-
-        if self.monitored_users:
-            if sender_id in self.monitored_users:
-                return False
-
-        return True
-
     # ================================================================
     #  LLM 分析
     # ================================================================
@@ -282,20 +410,18 @@ class ChatHelperPlugin(Star):
         session_id: str,
         sender_name: str,
         current_message: str,
+        effective_mode: str,
     ) -> Optional[str]:
         """调用 LLM 进行对话分析，返回分析文本或 None"""
         try:
-            # 获取上下文快照
             context_snapshot = list(self._buffers[session_id])[-self.context_count :]
 
-            # 构建完整提示词
             system_prompt = self._build_system_prompt()
             user_prompt = self._build_user_prompt(
-                context_snapshot, sender_name, current_message
+                context_snapshot, sender_name, current_message, effective_mode
             )
             full_prompt = f"{system_prompt}\n\n---\n\n{user_prompt}"
 
-            # 确定 LLM 提供商
             provider_id = self.provider_id
             if not provider_id:
                 try:
@@ -310,7 +436,6 @@ class ChatHelperPlugin(Star):
                 logger.warning("[ChatHelper] 未找到可用的 LLM 提供商")
                 return None
 
-            # 调用 LLM
             resp = await self.context.llm_generate(
                 chat_provider_id=provider_id,
                 prompt=full_prompt,
@@ -339,7 +464,6 @@ class ChatHelperPlugin(Star):
         if self.enable_action:
             dimensions.append(DIMENSION_PROMPTS["action"])
 
-        # 至少保留意图分析
         if not dimensions:
             dimensions = [DIMENSION_PROMPTS["intent"]]
 
@@ -355,9 +479,9 @@ class ChatHelperPlugin(Star):
         context: list[dict],
         sender_name: str,
         current_message: str,
+        effective_mode: str,
     ) -> str:
         """组装用户提示词（上下文 + 当前消息 + 分析指令）"""
-        # 格式化上下文
         if context:
             lines = []
             for msg in context:
@@ -368,7 +492,7 @@ class ChatHelperPlugin(Star):
             context_text = "（暂无历史记录）"
 
         mode_hint = MODE_INSTRUCTIONS.get(
-            self.analysis_mode, MODE_INSTRUCTIONS["standard"]
+            effective_mode, MODE_INSTRUCTIONS["standard"]
         )
 
         return (
@@ -415,53 +539,118 @@ class ChatHelperPlugin(Star):
     @chat_helper_cmd.command("status")
     async def cmd_status(self, event: AstrMessageEvent):
         """查看插件运行状态"""
+        sender_id = event.get_sender_id()
+        if not self._can_use_status(sender_id):
+            return  # 无权限时静默
+
+        mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
         txt = (
             f"📋 聊天助手状态 (v{VERSION})\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"启用: {'✅' if self.enabled else '❌'}\n"
-            f"监控模式: {self.monitor_mode}\n"
-            f"分析模式: {self.analysis_mode}\n"
+            f"群监控: {self.monitor_groups_mode} ({len(self.monitored_groups)})\n"
+            f"用户监控: {self.monitor_users_mode} ({len(self.monitored_users)})\n"
+            f"分析模式: {mode} (本群)\n"
             f"冷却时间: {self.cooldown_seconds}s\n"
-            f"回复模式: {self.response_mode}\n\n"
-            f"📊 统计\n"
+            f"回复模式: {self.response_mode}"
+        )
+        yield event.plain_result(txt)
+
+    @chat_helper_cmd.command("stats")
+    async def cmd_stats(self, event: AstrMessageEvent):
+        """查看分析统计和配置概览"""
+        sender_id = event.get_sender_id()
+        if not self._can_use_stats(sender_id):
+            return
+
+        mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
+        txt = (
+            f"📊 聊天助手统计 (v{VERSION})\n"
+            f"━━━━━━━━━━━━━━━━\n"
             f"已分析: {self._analysis_count} 次\n"
             f"错误: {self._error_count} 次\n\n"
-            f"📂 名单\n"
-            f"群组: {len(self.monitored_groups)} | "
-            f"用户: {len(self.monitored_users)} | "
-            f"排除: {len(self.excluded_users)}\n\n"
+            f"📂 配置概览\n"
+            f"群名单: {len(self.monitored_groups)} | "
+            f"用户名单: {len(self.monitored_users)} | "
+            f"被分析用户配置: {len(self.analysis_users)} | "
+            f"群模式配置: {len(self.analysis_mode_groups)}\n\n"
             f"🔍 分析维度\n"
             f"意图 {'✅' if self.enable_intent else '❌'} | "
             f"情绪 {'✅' if self.enable_emotion else '❌'} | "
             f"风险 {'✅' if self.enable_danger else '❌'} | "
-            f"建议 {'✅' if self.enable_action else '❌'}"
+            f"建议 {'✅' if self.enable_action else '❌'}\n\n"
+            f"当前群分析模式: {mode}"
         )
         yield event.plain_result(txt)
 
     @chat_helper_cmd.command("on")
     async def cmd_on(self, event: AstrMessageEvent):
-        """启用插件"""
+        """启用插件（仅超管）"""
+        if not _is_admin(event.get_sender_id(), self.admin_users):
+            return
         self.enabled = True
         yield event.plain_result("✅ 聊天助手已启用")
 
     @chat_helper_cmd.command("off")
     async def cmd_off(self, event: AstrMessageEvent):
-        """禁用插件"""
+        """禁用插件（仅超管）"""
+        if not _is_admin(event.get_sender_id(), self.admin_users):
+            return
         self.enabled = False
         yield event.plain_result("❌ 聊天助手已禁用")
 
     @chat_helper_cmd.command("mode")
     async def cmd_mode(self, event: AstrMessageEvent, mode: str = ""):
-        """切换分析模式: quick / standard / detailed"""
+        """切换本群分析模式（超管或已授权群成员）"""
+        sender_id = event.get_sender_id()
+        group_id = event.message_obj.group_id or ""
+
+        if not group_id:
+            yield event.plain_result("⚠️ 此命令仅在群聊中可用")
+            return
+
+        if not self._can_set_group_mode(sender_id, group_id):
+            return  # 无权限时静默
+
         if mode in MODE_INSTRUCTIONS:
-            self.analysis_mode = mode
-            yield event.plain_result(f"✅ 分析模式已切换为: {mode}")
+            self._runtime_group_modes[group_id] = mode
+            yield event.plain_result(f"✅ 本群分析模式已切换为: {mode}")
         else:
+            current = self._get_effective_analysis_mode(group_id)
             available = " / ".join(MODE_INSTRUCTIONS.keys())
             yield event.plain_result(
                 f"用法: /chat_helper mode <模式>\n"
                 f"可用: {available}\n"
-                f"当前: {self.analysis_mode}"
+                f"当前: {current}"
+            )
+
+    @chat_helper_cmd.command("analyze")
+    async def cmd_analyze(self, event: AstrMessageEvent, user_id: str = "", action: str = ""):
+        """设置被分析用户（添加/移除）"""
+        sender_id = event.get_sender_id()
+        group_id = event.message_obj.group_id or ""
+
+        if not user_id:
+            yield event.plain_result(
+                "用法: /chat_helper analyze <用户ID> <add|remove>\n"
+                "在目标群内使用，留空群组ID则全局生效"
+            )
+            return
+
+        if not self._can_manage_analysis_user(sender_id, group_id, user_id):
+            return  # 无权限时静默
+
+        if action == "add":
+            self._runtime_analysis_users[group_id].add(user_id)
+            yield event.plain_result(f"✅ 已将 {user_id} 加入本群被分析用户")
+        elif action == "remove":
+            self._runtime_analysis_users[group_id].discard(user_id)
+            yield event.plain_result(f"✅ 已将 {user_id} 从本群被分析用户移除")
+        else:
+            current = "在列表中" if self._is_analysis_target(user_id, group_id) else "不在列表中"
+            yield event.plain_result(
+                f"用户 {user_id} 当前{current}\n"
+                f"用法: /chat_helper analyze {user_id} <add|remove>"
             )
 
     # ================================================================
@@ -472,4 +661,6 @@ class ChatHelperPlugin(Star):
         """插件卸载时清理资源"""
         self._buffers.clear()
         self._last_analysis.clear()
+        self._runtime_analysis_users.clear()
+        self._runtime_group_modes.clear()
         logger.info("[ChatHelper] 插件已卸载")

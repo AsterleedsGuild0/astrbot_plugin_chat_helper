@@ -3,46 +3,132 @@
     "description": "启用插件",
     "type": "bool",
     "default": true,
-    "hint": "总开关，关闭后停止所有监控与分析"
+    "hint": "总开关，关闭后停止所有监控与分析。仅管理员可在 WebUI 修改。"
   },
   "provider_id": {
     "description": "LLM 服务商",
     "type": "string",
     "default": "",
     "_special": "select_provider",
-    "hint": "留空则使用当前会话的默认服务商"
+    "hint": "留空则使用 AstrBot 全局默认的模型提供商"
   },
-  "monitor_mode": {
-    "description": "监控模式",
+  "monitor_groups_mode": {
+    "description": "群聊名单模式",
     "type": "string",
-    "options": ["whitelist", "blacklist", "all"],
+    "options": ["whitelist", "blacklist"],
     "default": "whitelist",
-    "hint": "whitelist=只监控名单中的群/人, blacklist=排除名单中的群/人, all=监控全部"
+    "hint": "whitelist=只监控名单内的群, blacklist=排除名单内的群"
   },
   "monitored_groups": {
-    "description": "群组名单",
+    "description": "群聊名单",
     "type": "list",
     "default": [],
-    "hint": "填写群组ID或完整会话ID（可在群内发送 /sid 获取）"
+    "hint": "填写群组ID或完整会话ID（可在目标群内发送 /sid 获取）。白名单=只监控这些群, 黑名单=排除这些群"
+  },
+  "monitor_users_mode": {
+    "description": "用户名单模式",
+    "type": "string",
+    "options": ["whitelist", "blacklist"],
+    "default": "whitelist",
+    "hint": "whitelist=只监控名单内的用户, blacklist=排除名单内的用户"
   },
   "monitored_users": {
     "description": "用户名单",
     "type": "list",
     "default": [],
-    "hint": "填写用户ID，可与群组名单搭配使用"
+    "hint": "填写用户ID。白名单=只监控这些用户, 黑名单=排除这些用户"
   },
-  "excluded_users": {
-    "description": "排除用户",
+  "admin_users": {
+    "description": "超管用户",
     "type": "list",
     "default": [],
-    "hint": "这些用户的消息永远不会被分析，优先级最高"
+    "hint": "填写超管的用户ID，超管拥有所有命令权限，可通过命令修改配置"
+  },
+  "analysis_users": {
+    "description": "被分析用户配置",
+    "type": "template_list",
+    "default": [],
+    "hint": "按群-用户维度设置哪些用户的消息会被分析，以及谁有权限设置",
+    "templates": {
+      "entry": {
+        "name": "群-用户条目",
+        "display_item": "user_id",
+        "items": {
+          "group_id": {
+            "description": "群组ID",
+            "type": "string",
+            "default": "",
+            "hint": "留空表示全局生效（所有群和私聊）"
+          },
+          "user_id": {
+            "description": "被分析用户ID",
+            "type": "string",
+            "default": "",
+            "hint": "该用户的消息将被自动分析"
+          },
+          "can_set": {
+            "description": "允许命令设置",
+            "type": "bool",
+            "default": false,
+            "hint": "开启后该用户可通过命令将自己加入/移出分析列表"
+          }
+        }
+      }
+    }
+  },
+  "analysis_mode_groups": {
+    "description": "分析模式配置",
+    "type": "template_list",
+    "default": [],
+    "hint": "按群维度设置不同的分析模式，以及谁有权限设置",
+    "templates": {
+      "entry": {
+        "name": "群分析模式条目",
+        "display_item": "group_id",
+        "items": {
+          "group_id": {
+            "description": "群组ID",
+            "type": "string",
+            "default": "",
+            "hint": "留空表示全局默认"
+          },
+          "mode": {
+            "description": "分析模式",
+            "type": "string",
+            "options": ["quick", "standard", "detailed"],
+            "default": "standard",
+            "hint": "quick=简要, standard=标准, detailed=详细"
+          },
+          "can_set": {
+            "description": "允许命令设置",
+            "type": "bool",
+            "default": false,
+            "hint": "开启后该群成员可通过命令切换本群的分析模式"
+          }
+        }
+      }
+    }
+  },
+  "permission_status": {
+    "description": "查询状态权限",
+    "type": "string",
+    "options": ["admin", "anyone"],
+    "default": "admin",
+    "hint": "admin=仅超管可查询运行状态, anyone=所有用户可查询"
+  },
+  "permission_stats": {
+    "description": "查询统计权限",
+    "type": "string",
+    "options": ["admin", "anyone"],
+    "default": "admin",
+    "hint": "admin=仅超管可查看分析统计和配置概览, anyone=所有用户可查看"
   },
   "analysis_mode": {
-    "description": "分析模式",
+    "description": "默认分析模式",
     "type": "string",
     "options": ["quick", "standard", "detailed"],
     "default": "standard",
-    "hint": "quick=简要快速分析, standard=标准概率分析, detailed=详细深度分析"
+    "hint": "未按群单独设置时的全局默认分析模式"
   },
   "enable_intent_analysis": {
     "description": "意图解读",
