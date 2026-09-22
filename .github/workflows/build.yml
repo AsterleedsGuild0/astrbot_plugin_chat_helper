@@ -1,0 +1,48 @@
+name: Build Package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build plugin package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyYAML ruff
+
+      - name: Lint scripts
+        run: python -m ruff check scripts/package_plugin.py scripts/generate_changelog.py
+
+      - name: Build dev package
+        run: python scripts/package_plugin.py --dev-version
+
+      - name: Resolve dev package path
+        id: dev_package
+        shell: bash
+        run: |
+          PACKAGE_PATH=$(ls dist/astrbot_plugin_chat_helper-*-test.*.zip | head -1)
+          test -f "$PACKAGE_PATH"
+          echo "path=$PACKAGE_PATH" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename $PACKAGE_PATH .zip)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dev package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.dev_package.outputs.name }}
+          path: ${{ steps.dev_package.outputs.path }}
+          if-no-files-found: error
