@@ -2,7 +2,7 @@
 
 AstrBot 智能聊天助手插件 — 实时分析对话中对方的意图、情绪与风险等级，提供概率评估与回应建议。
 
-灵感来源于网络上流传的 "Jev" AI 对话分析助手概念图，将其从一个段子变成了可实际使用的 AstrBot 插件。
+灵感来源于 [Jev 聊天助手](https://github.com/jev-chat/jev-chat-jarvis)（Android 端微信/QQ 对话分析悬浮窗），将其核心能力——意图识别、情绪检测、风险评估、回应建议——移植到 AstrBot 机器人平台，让群聊/私聊中也能实时获得对话分析。
 
 当前版本：`v1.0.0`
 
@@ -290,5 +290,5 @@ MIT License — 详见 [LICENSE](LICENSE) 文件。
 
 ## 致谢
 
-- 灵感来源于网络上流传的 "Jev" AI 对话分析助手概念图
+- 灵感来源于 [Jev 聊天助手](https://github.com/jev-chat/jev-chat-jarvis)（Android 端微信/QQ 对话分析悬浮窗）
 - CI/CD 参考了 [astrbot_plugin_xqa](https://github.com/AsterleedsGuild0/astrbot_plugin_xqa) 的发布流水线设计
