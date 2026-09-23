@@ -27,200 +27,206 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 
 # ==================== 内置模板模块 ====================
-# 以下代码原在 templates.py，为兼容 AstrBot 插件加载机制合并至此
+# 简单 Markdown 格式输出，避免触发 AstrBot 文转图
 
-WIDTH = 50
-TOP_LEFT = "┌"
-TOP_RIGHT = "┐"
-BOTTOM_LEFT = "└"
-BOTTOM_RIGHT = "┘"
-HORIZONTAL = "─"
-VERTICAL = "│"
-DIVIDER_LEFT = "├"
-DIVIDER_RIGHT = "┤"
-PROGRESS_FULL = "█"
-PROGRESS_EMPTY = "░"
+STATUS_TEMPLATE = """**ChatHelper 状态** v{version}
 
+- 启用状态: {enabled}
+- 群监控: {group_mode} ({group_count})
+- 用户监控: {user_mode} ({user_count})
+- 分析模式: {analysis_mode} (本群)
+- 冷却时间: {cooldown}s
+- 回复模式: {response_mode}"""
 
-def _pad_center(text: str, width: int = WIDTH) -> str:
-    """将文本居中填充到指定宽度。"""
-    if len(text) >= width:
-        return text
-    total_pad = width - len(text)
-    left_pad = total_pad // 2
-    right_pad = total_pad - left_pad
-    return " " * left_pad + text + " " * right_pad
+STATS_TEMPLATE = """**ChatHelper 统计** v{version}
 
+- 已分析: {analysis_count} 次
+- 错误: {error_count} 次
 
-def _pad_right(text: str, width: int = WIDTH) -> str:
-    """将文本右填充到指定宽度。"""
-    if len(text) >= width:
-        return text
-    return text + " " * (width - len(text))
+**配置概览**
+- 群名单: {group_count}
+- 用户名单: {user_count}
+- 被分析用户: {analysis_user_count}
+- 群模式配置: {mode_group_count}
 
+**分析维度**
+- 意图: {intent_status} | 情绪: {emotion_status} | 风险: {danger_status} | 建议: {action_status}
+- 当前群模式: {current_mode}"""
 
-def render_card(title: str, body: str, width: int = WIDTH) -> str:
-    """渲染统一卡片样式。"""
-    lines = []
-    top = f"{TOP_LEFT}{HORIZONTAL * width}{TOP_RIGHT}"
-    divider = f"{DIVIDER_LEFT}{HORIZONTAL * width}{DIVIDER_RIGHT}"
-    bottom = f"{BOTTOM_LEFT}{HORIZONTAL * width}{BOTTOM_RIGHT}"
+HELP_TEMPLATE = """**ChatHelper 使用帮助**
 
-    lines.append(top)
-    lines.append(f"{VERTICAL}{_pad_center(title, width)}{VERTICAL}")
-    lines.append(divider)
-
-    for line in body.split("\n"):
-        if len(line) > width:
-            line = line[: width - 3] + "..."
-        lines.append(f"{VERTICAL}{_pad_right(line, width)}{VERTICAL}")
-
-    lines.append(bottom)
-    return "\n".join(lines)
-
-
-def render_progress_bar(
-    value: float, max_value: float = 10, width: int = 20
-) -> str:
-    """渲染进度条，如 ████████░░░░░░░░░░░░ 4/10。"""
-    if max_value <= 0:
-        max_value = 1
-    filled = int(round(width * min(value, max_value) / max_value))
-    bar = PROGRESS_FULL * filled + PROGRESS_EMPTY * (width - filled)
-    return f"{bar} {value:g}/{max_value:g}"
-
-
-STATUS_TEMPLATE = """启用状态: {enabled}
-群监控: {group_mode} ({group_count})
-用户监控: {user_mode} ({user_count})
-分析模式: {analysis_mode} (本群)
-冷却时间: {cooldown}s
-回复模式: {response_mode}"""
-
-STATS_TEMPLATE = """已分析: {analysis_count} 次
-错误: {error_count} 次
-
-[配置概览]
-群名单: {group_count}
-用户名单: {user_count}
-被分析用户: {analysis_user_count}
-群模式配置: {mode_group_count}
-
-[分析维度]
-意图: {intent_status}
-情绪: {emotion_status}
-风险: {danger_status}
-建议: {action_status}
-当前群模式: {current_mode}"""
-
-HELP_TEMPLATE = """用法: /chat_helper <命令> [参数]
-
-命令列表:
-  status          查看插件运行状态
-  stats           查看分析统计和配置概览
-  mode <模式>      切换本群分析模式
-  analyze <ID> <add|remove>  设置被分析用户
+```
+/chat_helper status              查看运行状态
+/chat_helper stats               查看统计概览
+/chat_helper mode <模式>          切换分析模式
+/chat_helper analyze <ID> <add|remove>  设置被分析用户
+```
 
 模式: quick / standard / detailed"""
 
-ANALYSIS_FALLBACK_TEMPLATE = """对象: {sender_name}
-消息: 「{message}」
+ANALYSIS_FALLBACK_TEMPLATE = """**💬 对话分析报告**
+
+**对象:** {sender_name}
+**消息:** 「{message}」
+
+---
 
 {analysis_text}"""
 
+# ==================== HTML 分析卡片模板 ====================
 
-def render_analysis(
-    sender_name: str,
-    message: str,
-    analysis: str,
-    enable_intent: bool = True,
-    enable_emotion: bool = True,
-    enable_danger: bool = True,
-    enable_action: bool = True,
-) -> str:
-    """渲染对话分析结果为统一卡片。"""
-    display_msg = message[:40] + ("..." if len(message) > 40 else "")
+ANALYSIS_HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  padding: 40px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  max-width: 520px;
+  width: 100%;
+  overflow: hidden;
+}
+.card-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 24px 28px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.card-body { padding: 24px 28px; }
+.meta {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: #555;
+}
+.meta strong { color: #333; }
+.dimension {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border-left: 4px solid;
+}
+.dimension-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.dimension-content {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #444;
+}
+.dimension-content small { color: #888; }
+.footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: #999;
+  border-top: 1px solid #eee;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">💬 对话分析报告</div>
+  <div class="card-body">
+    <div class="meta">
+      <strong>对象:</strong> {{ sender_name }}<br>
+      <strong>消息:</strong> 「{{ message }}」
+    </div>
+    {% for title, content, color in dimensions %}
+    <div class="dimension" style="border-left-color: {{ color }}; background: {{ color }}08;">
+      <div class="dimension-title" style="color: {{ color }};">{{ title }}</div>
+      <div class="dimension-content">{{ content }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer">ChatHelper 对话分析 · 仅供参考</div>
+</div>
+</body>
+</html>
+"""
 
-    data = _extract_json(analysis)
-    if data is None:
-        body = ANALYSIS_FALLBACK_TEMPLATE.format(
-            sender_name=sender_name,
-            message=display_msg,
-            analysis_text=analysis.strip(),
-        )
-        return render_card("💬 对话分析报告", body)
-
-    lines = [f"对象: {sender_name}", f"消息: 「{display_msg}」", ""]
-
-    if enable_intent and "intent" in data:
-        intent = data["intent"]
-        lines.append("📊 意图解读")
-        if isinstance(intent, dict):
-            surface = intent.get("surface", "")
-            if surface:
-                lines.append(f"表面: {surface}")
-            real = intent.get("real", "")
-            if real:
-                lines.append(f"真实: {real}")
-            other = intent.get("other", "")
-            if other:
-                lines.append(f"其他: {other}")
-        else:
-            lines.append(str(intent))
-        lines.append("")
-
-    if enable_emotion and "emotion" in data:
-        emotion = data["emotion"]
-        lines.append("❤️ 情绪评估")
-        if isinstance(emotion, dict):
-            lines.append(f"状态: {emotion.get('state', '未知')}")
-            intensity = emotion.get("intensity", 0)
-            if intensity:
-                lines.append(
-                    f"强度: {render_progress_bar(intensity, 10, 16)}"
-                )
-            trend = emotion.get("trend", "")
-            if trend:
-                lines.append(f"趋势: {trend}")
-        else:
-            lines.append(str(emotion))
-        lines.append("")
-
-    if enable_danger and "danger" in data:
-        danger = data["danger"]
-        lines.append("⚠️ 风险等级")
-        if isinstance(danger, dict):
-            level = danger.get("level", 0)
-            lines.append(render_progress_bar(level, 10, 20))
-            dtype = danger.get("type", "")
-            if dtype:
-                lines.append(f"类型: {dtype}")
-            note = danger.get("note", "")
-            if note:
-                lines.append(f"说明: {note}")
-        else:
-            lines.append(str(danger))
-        lines.append("")
-
-    if enable_action and "action" in data:
-        action = data["action"]
-        lines.append("💡 回应建议")
-        if isinstance(action, list):
-            for idx, item in enumerate(action, 1):
-                if isinstance(item, dict):
-                    strategy = item.get("strategy", "")
-                    prob = item.get("probability", "")
-                    if prob:
-                        lines.append(f"{idx}. {strategy} ({prob})")
-                    else:
-                        lines.append(f"{idx}. {strategy}")
-                else:
-                    lines.append(f"{idx}. {item}")
-        else:
-            lines.append(str(action))
-
-    body = "\n".join(lines).rstrip()
-    return render_card("💬 对话分析报告", body)
+ANALYSIS_HTML_FALLBACK = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  padding: 40px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  max-width: 520px;
+  width: 100%;
+  overflow: hidden;
+}
+.card-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 24px 28px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.card-body { padding: 24px 28px; font-size: 14px; line-height: 1.8; color: #444; }
+.meta {
+  background: #f8f9fa;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  color: #555;
+}
+.meta strong { color: #333; }
+.footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: #999;
+  border-top: 1px solid #eee;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">💬 对话分析报告</div>
+  <div class="card-body">
+    <div class="meta">
+      <strong>对象:</strong> {sender_name}<br>
+      <strong>消息:</strong> 「{message}」
+    </div>
+    <div>{analysis_text}</div>
+  </div>
+  <div class="footer">ChatHelper 对话分析 · 仅供参考</div>
+</div>
+</body>
+</html>
+"""
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -337,19 +343,17 @@ MODE_INSTRUCTIONS = {
 def _parse_permission_list(config: AstrBotConfig, key: str) -> list[dict]:
     """从配置解析 template_list 为 dict 列表。
 
-    template_list 在配置中的存储格式为 {"entry": [...]}，
-    需要提取 entry 键对应的列表。
+    template_list 存储格式为 [{"__template_key": "entry", ...}, ...]，
+    解析时剥离 __template_key 字段。
     """
     raw = config.get(key, [])
-    # 处理 {"entry": [...]} 格式
-    if isinstance(raw, dict):
-        entries = raw.get("entry", [])
-        if isinstance(entries, list):
-            return entries
-        return []
-    # 兼容直接是列表的情况
     if isinstance(raw, list):
-        return raw
+        # 剥离 __template_key，返回纯数据 dict
+        return [
+            {k: v for k, v in item.items() if k != "__template_key"}
+            for item in raw
+            if isinstance(item, dict)
+        ]
     return []
 
 
@@ -492,8 +496,11 @@ class ChatHelperPlugin(Star):
                             {"group_id": group_id, "user_id": uid, "can_set": False}
                         )
 
-            # template_list 类型需要按 {"entry": [...]} 格式写入
-            self.config["analysis_users"] = {"entry": self.analysis_users}
+            # template_list 类型每个条目需要 __template_key 标识模板
+            entries = [
+                {"__template_key": "entry", **e} for e in self.analysis_users
+            ]
+            self.config["analysis_users"] = entries
             self.config.save_config()
         except Exception as e:
             logger.warning(f"[ChatHelper] 配置同步失败: {e}")
@@ -647,14 +654,28 @@ class ChatHelperPlugin(Star):
             )
 
             if analysis:
-                response = self._format_response(sender_name, message_str, analysis)
+                image_url = await self._format_response(
+                    event, sender_name, message_str, analysis
+                )
 
-                if self.response_mode == "private":
-                    success = await self._try_send_private(event, sender_id, response)
-                    if not success:
-                        yield event.plain_result(response)
+                if image_url:
+                    if self.response_mode == "private":
+                        # 私聊模式先尝试发送图片，失败则回退到会话内
+                        try:
+                            await event.send_private_message(sender_id, image_url)
+                        except Exception:
+                            yield event.image_result(image_url)
+                    else:
+                        yield event.image_result(image_url)
                 else:
-                    yield event.plain_result(response)
+                    # HTML 渲染失败，回退到纯文本
+                    response = self._format_text_fallback(sender_name, message_str, analysis)
+                    if self.response_mode == "private":
+                        success = await self._try_send_private(event, sender_id, response)
+                        if not success:
+                            yield event.plain_result(response)
+                    else:
+                        yield event.plain_result(response)
 
                 self._last_analysis[session_id] = now
                 self._analysis_count += 1
@@ -790,10 +811,110 @@ class ChatHelperPlugin(Star):
     #  响应格式化与发送
     # ================================================================
 
-    @staticmethod
-    def _format_response(sender_name: str, message: str, analysis: str) -> str:
-        """将 LLM 分析结果包装为统一卡片样式"""
-        return render_analysis(sender_name, message, analysis)
+    async def _format_response(
+        self, event: AstrMessageEvent, sender_name: str, message: str, analysis: str
+    ) -> str | None:
+        """将 LLM 分析结果渲染为 HTML 图片，返回图片 URL；失败返回 None"""
+        display_msg = message[:60] + ("..." if len(message) > 60 else "")
+
+        # 尝试解析 JSON 结构化数据
+        data = _extract_json(analysis)
+
+        if data is None:
+            # 纯文本回退：包装为简单 HTML
+            html = ANALYSIS_HTML_FALLBACK.format(
+                sender_name=sender_name,
+                message=display_msg,
+                analysis_text=analysis.replace("\n", "<br>"),
+            )
+        else:
+            # 结构化渲染
+            html = self._render_analysis_html(sender_name, display_msg, data)
+
+        try:
+            url = await self.html_render(html, {})
+            return url
+        except Exception as e:
+            logger.warning(f"[ChatHelper] HTML 渲染失败，回退到文本: {e}")
+            return None
+
+    def _render_analysis_html(
+        self, sender_name: str, message: str, data: dict
+    ) -> str:
+        """使用 Jinja2 模板渲染分析结果 HTML。"""
+        # 构建维度数据
+        dimensions = []
+
+        if self.enable_intent and "intent" in data:
+            intent = data["intent"]
+            if isinstance(intent, dict):
+                dims = []
+                if intent.get("surface"):
+                    dims.append(f"表面: {intent['surface']}")
+                if intent.get("real"):
+                    dims.append(f"真实: {intent['real']}")
+                if intent.get("other"):
+                    dims.append(f"其他: {intent['other']}")
+                content = "<br>".join(dims)
+            else:
+                content = str(intent)
+            dimensions.append(("📊 意图解读", content, "#4A90D9"))
+
+        if self.enable_emotion and "emotion" in data:
+            emotion = data["emotion"]
+            if isinstance(emotion, dict):
+                state = emotion.get("state", "未知")
+                intensity = emotion.get("intensity", "")
+                trend = emotion.get("trend", "")
+                parts = [f"状态: {state}"]
+                if intensity:
+                    parts.append(f"强度: {intensity}/10")
+                if trend:
+                    parts.append(f"趋势: {trend}")
+                content = " | ".join(parts)
+            else:
+                content = str(emotion)
+            dimensions.append(("❤️ 情绪评估", content, "#E91E63"))
+
+        if self.enable_danger and "danger" in data:
+            danger = data["danger"]
+            if isinstance(danger, dict):
+                level = danger.get("level", 0)
+                dtype = danger.get("type", "")
+                note = danger.get("note", "")
+                content = f"等级: {level}/10"
+                if dtype:
+                    content += f" | 类型: {dtype}"
+                if note:
+                    content += f"<br><small>{note}</small>"
+            else:
+                content = str(danger)
+            dimensions.append(("⚠️ 风险等级", content, "#F44336"))
+
+        if self.enable_action and "action" in data:
+            action = data["action"]
+            if isinstance(action, list):
+                items = []
+                for idx, item in enumerate(action, 1):
+                    if isinstance(item, dict):
+                        strategy = item.get("strategy", "")
+                        prob = item.get("probability", "")
+                        if prob:
+                            items.append(f"{idx}. {strategy} ({prob})")
+                        else:
+                            items.append(f"{idx}. {strategy}")
+                    else:
+                        items.append(f"{idx}. {item}")
+                content = "<br>".join(items)
+            else:
+                content = str(action)
+            dimensions.append(("💡 回应建议", content, "#4CAF50"))
+
+        return ANALYSIS_HTML_TEMPLATE.render(
+            sender_name=sender_name,
+            message=message,
+            dimensions=dimensions,
+        )
 
     async def _try_send_private(
         self, event: AstrMessageEvent, target_id: str, text: str
@@ -805,6 +926,12 @@ class ChatHelperPlugin(Star):
         except Exception as e:
             logger.warning(f"[ChatHelper] 私聊发送失败，将回退到会话内回复: {e}")
             return False
+
+    @staticmethod
+    def _format_text_fallback(sender_name: str, message: str, analysis: str) -> str:
+        """HTML 渲染失败时的纯文本回退"""
+        display_msg = message[:60] + ("..." if len(message) > 60 else "")
+        return f"💬 分析 [{sender_name}] 的消息:\n「{display_msg}」\n\n{analysis}"
 
     # ================================================================
     #  指令
@@ -822,7 +949,9 @@ class ChatHelperPlugin(Star):
         if not self._can_use_status(sender_id):
             return  # 无权限时静默
 
-        yield event.plain_result(render_card(f"📊 ChatHelper 状态 v{VERSION}", STATUS_TEMPLATE.format(
+        mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
+        yield event.plain_result(STATUS_TEMPLATE.format(
+            version=VERSION,
             enabled="是" if self.enabled else "否",
             group_mode=self.monitor_groups_mode,
             group_count=len(self.monitored_groups),
@@ -831,7 +960,7 @@ class ChatHelperPlugin(Star):
             analysis_mode=mode,
             cooldown=self.cooldown_seconds,
             response_mode=self.response_mode,
-        )))
+        ))
 
     @chat_helper_cmd.command("stats")
     async def cmd_stats(self, event: AstrMessageEvent):
@@ -841,7 +970,8 @@ class ChatHelperPlugin(Star):
             return
 
         mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
-        body = STATS_TEMPLATE.format(
+        yield event.plain_result(STATS_TEMPLATE.format(
+            version=VERSION,
             analysis_count=self._analysis_count,
             error_count=self._error_count,
             group_count=len(self.monitored_groups),
@@ -853,8 +983,7 @@ class ChatHelperPlugin(Star):
             danger_status="开" if self.enable_danger else "关",
             action_status="开" if self.enable_action else "关",
             current_mode=mode,
-        )
-        yield event.plain_result(render_card(f"📈 ChatHelper 统计 v{VERSION}", body))
+        ))
 
     @chat_helper_cmd.command("mode")
     async def cmd_mode(self, event: AstrMessageEvent, mode: str = ""):
@@ -871,12 +1000,11 @@ class ChatHelperPlugin(Star):
 
         if mode in MODE_INSTRUCTIONS:
             self._runtime_group_modes[group_id] = mode
-            yield event.plain_result(render_card("✅ 模式切换", f"本群分析模式已切换为: {mode}"))
+            yield event.plain_result(f"**✅ 模式切换**\n\n本群分析模式已切换为: `{mode}`")
         else:
             current = self._get_effective_analysis_mode(group_id)
             available = " / ".join(MODE_INSTRUCTIONS.keys())
-            body = f"用法: /chat_helper mode <模式>\n可用: {available}\n当前: {current}"
-            yield event.plain_result(render_card("ℹ️ 模式帮助", body))
+            yield event.plain_result(f"**ℹ️ 模式帮助**\n\n用法: `/chat_helper mode <模式>`\n可用: {available}\n当前: {current}")
 
     @chat_helper_cmd.command("analyze")
     async def cmd_analyze(self, event: AstrMessageEvent, user_id: str = "", action: str = ""):
