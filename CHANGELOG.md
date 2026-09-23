@@ -1,4 +1,6 @@
-## 未发布
+# 更新日志
+
+## 1.0.0 (2026-09-23)
 
 ### ✨ 新功能
 
@@ -44,6 +46,7 @@
 
 ### 🧹 日常维护
 
+- 重构 release workflow，支持自动生成 CHANGELOG 并提交 @azmiao
 - 调整分析卡片样式，缩小背景留白并改为浅色背景 @azmiao
 - 调整VScode配置 @azmiao
 - 优化CHANGELOG生成逻辑 @azmiao
