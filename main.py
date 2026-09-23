@@ -820,29 +820,35 @@ class ChatHelperPlugin(Star):
         # 尝试解析 JSON 结构化数据
         data = _extract_json(analysis)
 
-        if data is None:
-            # 纯文本回退：包装为简单 HTML
-            html = ANALYSIS_HTML_FALLBACK.format(
-                sender_name=sender_name,
-                message=display_msg,
-                analysis_text=analysis.replace("\n", "<br>"),
-            )
-        else:
-            # 结构化渲染
-            html = self._render_analysis_html(sender_name, display_msg, data)
-
         try:
-            url = await self.html_render(html, {})
+            if data is None:
+                # 纯文本回退：使用 fallback 模板
+                url = await self.html_render(
+                    ANALYSIS_HTML_FALLBACK,
+                    {
+                        "sender_name": sender_name,
+                        "message": display_msg,
+                        "analysis_text": analysis.replace("\n", "<br>"),
+                    },
+                )
+            else:
+                # 结构化渲染：构建维度数据
+                dimensions = self._build_dimensions(data)
+                url = await self.html_render(
+                    ANALYSIS_HTML_TEMPLATE,
+                    {
+                        "sender_name": sender_name,
+                        "message": display_msg,
+                        "dimensions": dimensions,
+                    },
+                )
             return url
         except Exception as e:
             logger.warning(f"[ChatHelper] HTML 渲染失败，回退到文本: {e}")
             return None
 
-    def _render_analysis_html(
-        self, sender_name: str, message: str, data: dict
-    ) -> str:
-        """使用 Jinja2 模板渲染分析结果 HTML。"""
-        # 构建维度数据
+    def _build_dimensions(self, data: dict) -> list:
+        """从 JSON 数据构建维度列表，供 Jinja2 模板使用。"""
         dimensions = []
 
         if self.enable_intent and "intent" in data:
@@ -910,11 +916,7 @@ class ChatHelperPlugin(Star):
                 content = str(action)
             dimensions.append(("💡 回应建议", content, "#4CAF50"))
 
-        return ANALYSIS_HTML_TEMPLATE.render(
-            sender_name=sender_name,
-            message=message,
-            dimensions=dimensions,
-        )
+        return dimensions
 
     async def _try_send_private(
         self, event: AstrMessageEvent, target_id: str, text: str
