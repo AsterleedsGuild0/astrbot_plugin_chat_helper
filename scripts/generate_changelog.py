@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -17,6 +18,12 @@ DEFAULT_CHANGELOG = ROOT / "CHANGELOG.md"
 CATEGORY_ORDER = (
     "新增", "变更", "弃用", "移除", "修复", "安全", "文档", "测试", "内部", "其他",
 )
+
+GITHUB_NOREPLY_PATTERN = re.compile(
+    r"^(?:\d+\+)?(?P<username>[^@]+)@users\.noreply\.github\.com$",
+    re.IGNORECASE,
+)
+DEFAULT_NICKNAME_MAP_PATH = ROOT / ".vscode" / "git-nickname-username.json"
 
 ISSUE_PATTERN = re.compile(r"(?<![\w/])#(\d+)\b")
 HEADING_PATTERN = re.compile(
@@ -36,6 +43,8 @@ IMAGE_PATTERN = re.compile(r"!\[[^]\n]*\](?:\([^\n)]*\)|\[[^]\n]*\])?")
 class Commit:
     subject: str
     body: str = ""
+    author_name: str = ""
+    author_email: str = ""
 
 
 def classify_commit(subject: str) -> str:
@@ -80,26 +89,67 @@ def parse_git_log(output: str) -> list[Commit]:
         record = record.strip("\n")
         if not record:
             continue
-        fields = record.split("\x1f", 2)
-        if len(fields) != 3:
+        fields = record.split("\x1f", 4)
+        if len(fields) != 5:
             raise ValueError("Unexpected git log record")
-        _hash, subject, body = fields
-        commits.append(Commit(subject=subject.strip(), body=body.strip()))
+        _hash, subject, body, author_name, author_email = fields
+        commits.append(Commit(
+            subject=subject.strip(),
+            body=body.strip(),
+            author_name=author_name.strip(),
+            author_email=author_email.strip(),
+        ))
     return commits
+
+
+def load_nickname_map(path: Path | None = None) -> dict[str, str]:
+    """加载 Git 昵称 → GitHub 用户名映射表。"""
+    if path is None:
+        path = DEFAULT_NICKNAME_MAP_PATH
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Git 昵称映射配置必须是 JSON 对象：{path}")
+    return {
+        name: username
+        for name, username in data.items()
+        if not name.startswith("$") and isinstance(username, str)
+    }
+
+
+def format_author(author_name: str, author_email: str, nickname_map: dict[str, str]) -> str:
+    """格式化作者显示：优先查映射表 → 从 GitHub noreply 邮箱提取 → 原始昵称。"""
+    mapped = nickname_map.get(author_name.strip())
+    if mapped:
+        return f"@{mapped}"
+    match = GITHUB_NOREPLY_PATTERN.fullmatch(author_email.strip())
+    if match:
+        return f"@{match.group('username')}"
+    return author_name.strip()
 
 
 def read_commits(from_ref: str | None, to_ref: str) -> list[Commit]:
     revision = f"{from_ref}..{to_ref}" if from_ref else to_ref
     result = subprocess.run(
-        ["git", "log", "--format=%H%x1f%s%x1f%b%x1e", revision],
-        cwd=ROOT, check=True, capture_output=True, text=True,
+        ["git", "log", "--format=%H%x1f%s%x1f%b%x1f%an%x1f%ae%x1e", revision],
+        cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8",
     )
     return parse_git_log(result.stdout)
 
 
-def generate_section(version: str, release_date: str, commits: list[Commit]) -> str:
+def generate_section(
+    version: str,
+    release_date: str,
+    commits: list[Commit],
+    show_author: bool = True,
+    nickname_map: dict[str, str] | None = None,
+) -> str:
     if not commits:
         raise ValueError("No commits found for the requested revision range")
+
+    if nickname_map is None:
+        nickname_map = load_nickname_map()
 
     grouped: dict[str, list[str]] = {cat: [] for cat in CATEGORY_ORDER}
     for commit in commits:
@@ -108,6 +158,9 @@ def generate_section(version: str, release_date: str, commits: list[Commit]) -> 
         refs = extract_issue_references(f"{commit.subject}\n{commit.body}")
         if refs and not extract_issue_references(description):
             description = f"{description}（{', '.join(refs)}）"
+        if show_author and (commit.author_name or commit.author_email):
+            author = format_author(commit.author_name, commit.author_email, nickname_map)
+            description = f"{description}（{author}）"
         grouped[category].append(f"- {description}")
 
     lines = [f"## [{version}] - {release_date}"]
@@ -241,7 +294,11 @@ def write_section(
 
 def command_generate(args: argparse.Namespace) -> int:
     commits = read_commits(args.from_ref, args.to_ref)
-    section = generate_section(args.version, args.date, commits)
+    nickname_map = load_nickname_map()
+    section = generate_section(
+        args.version, args.date, commits,
+        show_author=args.show_author, nickname_map=nickname_map,
+    )
     if args.write:
         write_section(args.changelog, args.version, section, args.from_ref)
     elif args.output:
@@ -274,6 +331,12 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--to-ref", default="HEAD")
     gen.add_argument("--date", default=date.today().isoformat())
     gen.add_argument("--changelog", type=Path, default=DEFAULT_CHANGELOG)
+    gen.add_argument(
+        "--no-author",
+        dest="show_author",
+        action="store_false",
+        help="不在条目后附加提交作者（默认附加 @作者）",
+    )
     gen_out = gen.add_mutually_exclusive_group()
     gen_out.add_argument("--write", action="store_true")
     gen_out.add_argument("--output", type=Path)
