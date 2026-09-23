@@ -2,6 +2,7 @@
 
 ### ✨ 新功能
 
+- 重构CHANGLOG生成逻辑 @azmiao
 - 对话分析结果改用 HTML 图片渲染，修复 template_list 配置格式 @azmiao
 - 添加插件图标与中文显示名「聊天对话分析助手」 @azmiao
 - 新增模板渲染模块，统一现代化卡片样式输出 @azmiao
@@ -9,6 +10,8 @@
 
 ### 🐛 Bug 修复
 
+- 修复旧版无效 extract 子命令 @azmiao
+- 修复Ruff校验 @azmiao
 - 修复 release 版本校验时 v 前缀不一致导致的比较失败 @azmiao
 - 修复 html_render 调用方式，直接传模板字符串和数据而非自行渲染 @azmiao
 - 转义 SYSTEM_PROMPT_TEMPLATE 中的 JSON 花括号，修复 KeyError @azmiao
@@ -41,6 +44,8 @@
 
 ### 🧹 日常维护
 
+- 调整分析卡片样式，缩小背景留白并改为浅色背景 @azmiao
+- 调整VScode配置 @azmiao
 - 优化CHANGELOG生成逻辑 @azmiao
 - 移除 tests 目录并停止 git 跟踪 @azmiao
 - 添加 CI/CD 自动化发布基础设施 @azmiao

@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       version:
@@ -19,14 +19,72 @@ on:
 permissions:
   contents: write
 
-jobs:
-  release:
-    name: Build and publish release
-    runs-on: ubuntu-latest
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  metadata:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
     steps:
-      - name: Checkout
+      - name: Checkout full history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install PyYAML
+
+      - name: Validate tag and metadata version
+        id: validate
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $tag" >&2
+            exit 1
+          fi
+
+          metadata_version="$(python - <<'PY'
+          import yaml
+          with open('metadata.yaml', 'r', encoding='utf-8') as f:
+              print(yaml.safe_load(f)['version'])
+          PY
+          )"
+
+          # 统一去掉 v 前缀再比较，兼容 metadata.yaml 写 1.0.0 或 v1.0.0
+          if [[ "${metadata_version#v}" != "${tag#v}" ]]; then
+            echo "metadata.yaml version ($metadata_version) does not match release version ($tag)" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build plugin package
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.tag }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,58 +96,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install PyYAML ruff
 
-      - name: Resolve release version
-        id: version
-        shell: bash
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME}"
-          fi
-
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release version: $VERSION" >&2
-            exit 1
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Validate metadata version
-        shell: bash
-        run: |
-          METADATA_VERSION="$(python - <<'PY'
-          import yaml
-
-          with open('metadata.yaml', 'r', encoding='utf-8') as f:
-              print(yaml.safe_load(f)['version'])
-          PY
-          )"
-
-          # 统一去掉 v 前缀再比较，兼容 metadata.yaml 写 1.0.0 或 v1.0.0
-          RELEASE_VERSION="${{ steps.version.outputs.version }}"
-          if [[ "${METADATA_VERSION#v}" != "${RELEASE_VERSION#v}" ]]; then
-            echo "metadata.yaml version ($METADATA_VERSION) does not match release version ($RELEASE_VERSION)" >&2
-            exit 1
-          fi
-
-      - name: Extract release notes
-        run: >-
-          python scripts/generate_changelog.py
-          --tag "${{ steps.version.outputs.version }}"
-          --output release-notes.md
-
       - name: Lint scripts
         run: python -m ruff check scripts/package_plugin.py scripts/generate_changelog.py
 
       - name: Build plugin package
-        run: python scripts/package_plugin.py --package-version "${{ steps.version.outputs.version }}"
+        run: python scripts/package_plugin.py --package-version "${{ needs.metadata.outputs.tag }}"
 
       - name: Resolve package path
         id: package
         shell: bash
         run: |
-          PACKAGE_PATH="dist/astrbot_plugin_chat_helper-${{ steps.version.outputs.version }}.zip"
+          set -euo pipefail
+          PACKAGE_PATH="dist/astrbot_plugin_chat_helper-${{ needs.metadata.outputs.tag }}.zip"
           test -f "$PACKAGE_PATH"
           BASENAME=$(basename "$PACKAGE_PATH" .zip)
           unzip -q "$PACKAGE_PATH" -d "./$BASENAME"
@@ -99,15 +117,94 @@ jobs:
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: astrbot_plugin_chat_helper-${{ steps.version.outputs.version }}
+          name: astrbot_plugin_chat_helper-${{ needs.metadata.outputs.tag }}
           path: ${{ steps.package.outputs.path }}
           if-no-files-found: error
+          retention-days: 7
+
+  changelog:
+    name: Generate changelog
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate release notes and full changelog
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git show "$RELEASE_TAG:scripts/generate_changelog.py" > "$RUNNER_TEMP/generate_changelog.py"
+          python "$RUNNER_TEMP/generate_changelog.py" --tag "$RELEASE_TAG" > release-notes.md
+          python "$RUNNER_TEMP/generate_changelog.py" --all --output CHANGELOG.md
+          test -s release-notes.md
+          test -s CHANGELOG.md
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Commit changelog
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "CHANGELOG.md 无变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore 🔧: 更新 CHANGELOG"
+          git push origin "HEAD:$DEFAULT_BRANCH"
+
+  release:
+    name: Publish GitHub Release
+    needs: [metadata, build, changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: astrbot_plugin_chat_helper-${{ needs.metadata.outputs.tag }}
+          path: assets/package
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: assets/metadata
+
+      - name: Verify assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s assets/metadata/release-notes.md
+          plugin_zip="$(ls assets/package/*.zip | head -n1)"
+          test -s "$plugin_zip"
+          echo "PLUGIN_ZIP=$plugin_zip" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: astrbot_plugin_chat_helper ${{ steps.version.outputs.version }}
-          body_path: release-notes.md
-          files: ${{ steps.package.outputs.zip_path }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(steps.version.outputs.version, '-') }}
+          tag_name: ${{ needs.metadata.outputs.tag }}
+          name: astrbot_plugin_chat_helper ${{ needs.metadata.outputs.tag }}
+          body_path: assets/metadata/release-notes.md
+          files: ${{ env.PLUGIN_ZIP }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(needs.metadata.outputs.tag, '-') }}
