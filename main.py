@@ -1013,7 +1013,7 @@ class ChatHelperPlugin(Star):
         group_id = event.message_obj.group_id or ""
 
         if not user_id:
-            yield event.plain_result(render_card("ℹ️ 使用帮助", HELP_TEMPLATE))
+            yield event.plain_result(HELP_TEMPLATE)
             return
 
         if not self._can_manage_analysis_user(sender_id, group_id, user_id):
@@ -1022,7 +1022,7 @@ class ChatHelperPlugin(Star):
         if action == "add":
             self._runtime_analysis_users[group_id].add(user_id)
             self._sync_config()
-            yield event.plain_result(render_card("✅ 添加成功", f"已将 {user_id} 加入本群被分析用户"))
+            yield event.plain_result(f"**✅ 添加成功**\n\n已将 `{user_id}` 加入本群被分析用户")
         elif action == "remove":
             self._runtime_analysis_users[group_id].discard(user_id)
             # 从配置中也移除
@@ -1032,11 +1032,10 @@ class ChatHelperPlugin(Star):
                 if not (e.get("group_id", "") == group_id and e.get("user_id") == user_id)
             ]
             self._sync_config()
-            yield event.plain_result(render_card("✅ 移除成功", f"已将 {user_id} 从本群被分析用户移除"))
+            yield event.plain_result(f"**✅ 移除成功**\n\n已将 `{user_id}` 从本群被分析用户移除")
         else:
             current = "在列表中" if self._is_analysis_target(user_id, group_id) else "不在列表中"
-            body = f"用户 {user_id} 当前{current}\n用法: /chat_helper analyze {user_id} <add|remove>"
-            yield event.plain_result(render_card("ℹ️ 用户状态", body))
+            yield event.plain_result(f"**ℹ️ 用户状态**\n\n用户 `{user_id}` 当前{current}\n用法: `/chat_helper analyze {user_id} <add|remove>`")
 
     # ================================================================
     #  生命周期
