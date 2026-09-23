@@ -210,3 +210,5 @@ jobs:
           body_path: assets/metadata/release-notes.md
           files: ${{ env.PLUGIN_ZIP }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(needs.metadata.outputs.tag, '-') }}
+          fail_on_unmatched_files: false
+          overwrite_files: true
