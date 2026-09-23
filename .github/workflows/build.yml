@@ -40,8 +40,10 @@ jobs:
         run: |
           PACKAGE_PATH=$(ls dist/astrbot_plugin_chat_helper-*-test.*.zip | head -1)
           test -f "$PACKAGE_PATH"
-          echo "path=$PACKAGE_PATH" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename $PACKAGE_PATH .zip)" >> "$GITHUB_OUTPUT"
+          BASENAME=$(basename "$PACKAGE_PATH")
+          mv "$PACKAGE_PATH" "./$BASENAME"
+          echo "path=./$BASENAME" >> "$GITHUB_OUTPUT"
+          echo "name=${BASENAME%.zip}" >> "$GITHUB_OUTPUT"
 
       - name: Upload dev package artifact
         uses: actions/upload-artifact@v4

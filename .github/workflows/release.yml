@@ -89,7 +89,9 @@ jobs:
         run: |
           PACKAGE_PATH="dist/astrbot_plugin_chat_helper-${{ steps.version.outputs.version }}.zip"
           test -f "$PACKAGE_PATH"
-          echo "path=$PACKAGE_PATH" >> "$GITHUB_OUTPUT"
+          BASENAME=$(basename "$PACKAGE_PATH")
+          mv "$PACKAGE_PATH" "./$BASENAME"
+          echo "path=./$BASENAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
