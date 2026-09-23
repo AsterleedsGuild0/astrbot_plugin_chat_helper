@@ -28,27 +28,12 @@ AstrBot 智能聊天助手插件 — 实时分析对话中对方的意图、情�
 
 ## 效果示例
 
-当女友发来 "你今天是不是又忘了我跟你说过什么？"：
+当女友发来 "你今天是不是又忘了我跟你说过什么？"，机器人会返回一张精美的 HTML 分析卡片图片：
 
-```
-💬 分析 [宝儿] 的消息:
-「你今天是不是又忘了我跟你说过什么？」
-────────────────────
-📊 意图解读
-表面：询问你是否还记得某事（7%）
-真实：想确认你在不在乎她（72%）| 生气想吵架（20%）
-
-❤️ 情绪评估
-不满+期待，强度 7/10，趋势上升
-
-⚠️ 风险等级 9/10
-🚨 紧急提醒——这是典型的"送命题"，空口回答极易踩雷
-
-💡 回应建议
-- 先别急着答具体内容，表示"记得，让我自己说"（推荐度 91%）
-- 立刻道歉并承诺补偿（推荐度 65%）
-- 避免：硬猜答案（4% 成功率）
-```
+- **📊 意图解读**：表面含义 + 真实意图（附概率）+ 其他可能
+- **❤️ 情绪评估**：当前情绪 + 强度（1-10）+ 趋势
+- **⚠️ 风险等级**：X/10 + 风险类型 + 紧急提醒（≥7 时）
+- **💡 回应建议**：2-3 个推荐策略（附推荐度）+ 应避免的方式
 
 ---
 
@@ -62,13 +47,6 @@ AstrBot 智能聊天助手插件 — 实时分析对话中对方的意图、情�
 | `/chat_helper stats` | 查看分析统计和配置概览 | 超管 或 配置为所有人可用 |
 | `/chat_helper mode <模式>` | 切换本群分析模式 | 超管 或 已授权群成员 |
 | `/chat_helper analyze <用户ID> <add\|remove>` | 设置被分析用户 | 超管 或 已授权用户 |
-
-### 超管指令
-
-| 指令 | 说明 |
-|------|------|
-| `/chat_helper on` | 启用插件 |
-| `/chat_helper off` | 禁用插件 |
 
 > **无权限时静默**——非授权用户发送命令不会收到任何响应。
 
@@ -226,7 +204,7 @@ AstrBot 智能聊天助手插件 — 实时分析对话中对方的意图、情�
 [LLM] 组装提示词（系统提示词 + 上下文 + 当前消息 + 有效分析模式）
     │
     ▼
-[输出] 格式化分析结果并发送
+[输出] 渲染为 HTML 图片并发送
     │
     ▼
 [模式] reply → 发送到当前会话
@@ -241,7 +219,6 @@ AstrBot 智能聊天助手插件 — 实时分析对话中对方的意图、情�
 
 ```bash
 uv sync
-uv run python -m unittest discover -s tests -v
 uv run python scripts/package_plugin.py --dev-version
 ```
 
@@ -258,22 +235,20 @@ uv run python scripts/package_plugin.py --dev-version
 
 ```
 astrbot_plugin_chat_helper/
-├── main.py                  # 插件主逻辑
+├── main.py                  # 插件主逻辑（含内置模板）
 ├── metadata.yaml            # AstrBot 插件元数据
 ├── _conf_schema.json        # WebUI 配置面板 Schema
 ├── CHANGELOG.md             # 版本变更记录
 ├── LICENSE                  # MIT 许可证
+├── logo.png                 # 插件图标（256×256）
 ├── pyproject.toml           # 项目配置（uv 管理）
 ├── requirements.txt         # 运行时依赖（无额外依赖）
 ├── scripts/
 │   ├── package_plugin.py    # 打包脚本
 │   └── generate_changelog.py # Changelog 生成/提取
-├── tests/
-│   ├── astrbot_stubs.py     # AstrBot API 桩模块
-│   ├── test_package_plugin.py
-│   └── test_generate_changelog.py
 └── .github/workflows/
-    └── release.yml          # GitHub Actions 发布流水线
+    ├── build.yml            # push 触发构建
+    └── release.yml          # tag 触发发布
 ```
 
 ---
@@ -283,7 +258,7 @@ astrbot_plugin_chat_helper/
 ### 为什么某些消息没有被分析？
 
 按以下顺序排查：
-1. 插件是否已启用（WebUI 中 `enabled=true` 或超管发送 `/chat_helper on`）
+1. 插件是否已启用（WebUI 中 `enabled=true`）
 2. 群聊监控：该群是否在名单内（白名单）或不在名单内（黑名单）
 3. 用户监控：该用户是否在名单内（白名单）或不在名单内（黑名单）
 4. 该用户是否在被分析用户列表中（`analysis_users` 或运行时添加）
