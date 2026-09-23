@@ -11,7 +11,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-
 VERSION_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # type 与 emoji 之间的空格可有可无（\s*），同时兼容 "feat ✨:" 旧格式与 "feat✨:" 新格式
 COMMIT_PATTERN = re.compile(
