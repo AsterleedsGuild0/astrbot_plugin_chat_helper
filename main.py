@@ -276,28 +276,28 @@ SYSTEM_PROMPT_TEMPLATE = """你是一位专业的对话分析专家，擅长解�
 请严格使用以下 JSON 格式返回分析结果，不要包含任何其他文本：
 
 ```json
-{
-  "intent": {
+{{
+  "intent": {{
     "surface": "对方字面意思",
     "real": "真实意图（附概率）",
     "other": "其他可能解读（附概率）"
-  },
-  "emotion": {
+  }},
+  "emotion": {{
     "state": "当前情绪状态",
     "intensity": 5,
     "trend": "上升/稳定/下降"
-  },
-  "danger": {
+  }},
+  "danger": {{
     "level": 3,
     "type": "情感风险/沟通风险/关系风险等",
     "note": "简要说明，>=7时标注🚨紧急提醒"
-  },
+  }},
   "action": [
-    {"strategy": "推荐回应策略1", "probability": "72%"},
-    {"strategy": "推荐回应策略2", "probability": "65%"},
-    {"strategy": "应避免的回应方式", "probability": ""}
+    {{"strategy": "推荐回应策略1", "probability": "72%"}},
+    {{"strategy": "推荐回应策略2", "probability": "65%"}},
+    {{"strategy": "应避免的回应方式", "probability": ""}}
   ]
-}
+}}
 ```
 
 ## 约束
