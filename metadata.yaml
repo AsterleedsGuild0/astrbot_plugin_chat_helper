@@ -2,5 +2,5 @@ name: astrbot_plugin_chat_helper
 display_name: 聊天对话分析助手
 desc: 智能聊天助手 - 实时分析对话意图、情绪与风险等级，提供概率评估与回应建议，支持群聊/私聊及精细化配置
 short_desc: 实时分析对话意图、情绪与风险，提供回应建议
-version: 1.0.0
+version: 1.0.1
 author: AZMIAO
