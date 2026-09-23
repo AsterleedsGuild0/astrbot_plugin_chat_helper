@@ -1,20 +1,4 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
   "python.terminal.activateEnvironment": true,
-  "editor.formatOnSave": true,
-  "[python]": {
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.codeActionsOnSave": {
-      "source.organizeImports.ruff": "explicit"
-    }
-  },
-  "files.eol": "\n",
-  "files.encoding": "utf8",
-  "files.exclude": {
-    "**/__pycache__": true,
-    "**/*.pyc": true,
-    ".venv": true,
-    "dist": true,
-    "*.egg-info": true
-  }
 }
