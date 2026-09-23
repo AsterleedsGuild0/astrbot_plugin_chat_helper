@@ -66,8 +66,10 @@ jobs:
           PY
           )"
 
-          if [[ "$METADATA_VERSION" != "${{ steps.version.outputs.version }}" ]]; then
-            echo "metadata.yaml version ($METADATA_VERSION) does not match release version (${{ steps.version.outputs.version }})" >&2
+          # 统一去掉 v 前缀再比较，兼容 metadata.yaml 写 1.0.0 或 v1.0.0
+          RELEASE_VERSION="${{ steps.version.outputs.version }}"
+          if [[ "${METADATA_VERSION#v}" != "${RELEASE_VERSION#v}" ]]; then
+            echo "metadata.yaml version ($METADATA_VERSION) does not match release version ($RELEASE_VERSION)" >&2
             exit 1
           fi
 
