@@ -12,6 +12,7 @@
 
 ### 🐛 Bug 修复
 
+- 发布前删除残留 release，避免 tag 重打导致 422 冲突 @azmiao
 - release 发布时覆盖已有文件，避免 tag 重打导致冲突 @azmiao
 - release artifact 同时上传 zip 文件，修复发布时找不到包 @azmiao
 - 修复旧版无效 extract 子命令 @azmiao
@@ -49,6 +50,7 @@
 
 ### 🧹 日常维护
 
+- 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 重构 release workflow，支持自动生成 CHANGELOG 并提交 @azmiao
