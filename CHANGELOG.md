@@ -28,6 +28,8 @@
 
 ### 🎨 代码重构
 
+- 合并 build 和 release workflow，统一为 Build & Release @azmiao
+- 重写 release workflow，简化结构并修复 zip 嵌套 @azmiao
 - 优化权限配置和命令交互 @azmiao
 - 重构权限体系与配置结构 @azmiao
 
@@ -51,6 +53,7 @@
 
 ### 🧹 日常维护
 
+- 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
