@@ -75,8 +75,8 @@ jobs:
 
       - name: Extract release notes
         run: >-
-          python scripts/generate_changelog.py extract
-          "${{ steps.version.outputs.version }}"
+          python scripts/generate_changelog.py
+          --tag "${{ steps.version.outputs.version }}"
           --output release-notes.md
 
       - name: Lint scripts
