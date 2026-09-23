@@ -118,7 +118,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: astrbot_plugin_chat_helper-${{ needs.metadata.outputs.tag }}
-          path: ${{ steps.package.outputs.path }}
+          path: |
+            ${{ steps.package.outputs.path }}
+            ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
           retention-days: 7
 
