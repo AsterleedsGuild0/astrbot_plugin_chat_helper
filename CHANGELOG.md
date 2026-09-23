@@ -12,6 +12,7 @@
 
 ### 🐛 Bug 修复
 
+- release artifact 同时上传 zip 文件，修复发布时找不到包 @azmiao
 - 修复旧版无效 extract 子命令 @azmiao
 - 修复Ruff校验 @azmiao
 - 修复 release 版本校验时 v 前缀不一致导致的比较失败 @azmiao
@@ -29,6 +30,7 @@
 
 ### 📚 文档
 
+- 补充说明灵感来源为 Jev 聊天助手 @azmiao
 - 更新 README，移除超管指令和 tests 引用，更新效果示例说明 @azmiao
 - 补充完整 README 使用文档 @azmiao
 
@@ -46,6 +48,7 @@
 
 ### 🧹 日常维护
 
+- 更新 CHANGELOG @github-actions[bot]
 - 重构 release workflow，支持自动生成 CHANGELOG 并提交 @azmiao
 - 调整分析卡片样式，缩小背景留白并改为浅色背景 @azmiao
 - 调整VScode配置 @azmiao
