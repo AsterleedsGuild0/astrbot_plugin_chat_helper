@@ -24,6 +24,8 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 
+from templates import render_analysis, render_card, STATUS_TEMPLATE, STATS_TEMPLATE, HELP_TEMPLATE
+
 # ==================== 常量 ====================
 
 VERSION = "1.0.0"
@@ -45,17 +47,40 @@ SYSTEM_PROMPT_TEMPLATE = """你是一位专业的对话分析专家，擅长解�
 {dimensions}
 
 ## 输出格式
-- 使用清晰分段和 emoji 增强可读性
-- 每个维度 1-3 句话，简洁有力
-- 概率用百分比（如 72%）
-- 风险等级用 X/10 格式
-- 不确定时标注"存疑"
-- 全部使用中文
+请严格使用以下 JSON 格式返回分析结果，不要包含任何其他文本：
+
+```json
+{
+  "intent": {
+    "surface": "对方字面意思",
+    "real": "真实意图（附概率）",
+    "other": "其他可能解读（附概率）"
+  },
+  "emotion": {
+    "state": "当前情绪状态",
+    "intensity": 5,
+    "trend": "上升/稳定/下降"
+  },
+  "danger": {
+    "level": 3,
+    "type": "情感风险/沟通风险/关系风险等",
+    "note": "简要说明，>=7时标注🚨紧急提醒"
+  },
+  "action": [
+    {"strategy": "推荐回应策略1", "probability": "72%"},
+    {"strategy": "推荐回应策略2", "probability": "65%"},
+    {"strategy": "应避免的回应方式", "probability": ""}
+  ]
+}
+```
 
 ## 约束
 - 分析仅供参考，不能替代真实沟通
 - 不鼓励欺骗、操控或不健康的关系行为
 - 检测到严重危险信号（威胁、自残等）时明确提醒用户
+- 概率用百分比（如 72%），风险等级用 1-10 数字
+- 不确定时标注"存疑"
+- 全部使用中文
 """
 
 # 各维度提示词片段
@@ -535,11 +560,8 @@ class ChatHelperPlugin(Star):
 
     @staticmethod
     def _format_response(sender_name: str, message: str, analysis: str) -> str:
-        """将 LLM 分析结果包装为用户可读的响应"""
-        display_msg = message[:60] + ("..." if len(message) > 60 else "")
-        header = f"💬 分析 [{sender_name}] 的消息:\n「{display_msg}」\n"
-        separator = "─" * 20 + "\n"
-        return header + separator + analysis
+        """将 LLM 分析结果包装为统一卡片样式"""
+        return render_analysis(sender_name, message, analysis)
 
     async def _try_send_private(
         self, event: AstrMessageEvent, target_id: str, text: str
@@ -568,17 +590,16 @@ class ChatHelperPlugin(Star):
         if not self._can_use_status(sender_id):
             return  # 无权限时静默
 
-        mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
-        lines = [
-            f"[ChatHelper] 状态 v{VERSION}",
-            f"启用: {'是' if self.enabled else '否'}",
-            f"群监控: {self.monitor_groups_mode} ({len(self.monitored_groups)})",
-            f"用户监控: {self.monitor_users_mode} ({len(self.monitored_users)})",
-            f"分析模式: {mode} (本群)",
-            f"冷却时间: {self.cooldown_seconds}s",
-            f"回复模式: {self.response_mode}",
-        ]
-        yield event.plain_result("\n".join(lines))
+        yield event.plain_result(render_card(f"📊 ChatHelper 状态 v{VERSION}", STATUS_TEMPLATE.format(
+            enabled="是" if self.enabled else "否",
+            group_mode=self.monitor_groups_mode,
+            group_count=len(self.monitored_groups),
+            user_mode=self.monitor_users_mode,
+            user_count=len(self.monitored_users),
+            analysis_mode=mode,
+            cooldown=self.cooldown_seconds,
+            response_mode=self.response_mode,
+        )))
 
     @chat_helper_cmd.command("stats")
     async def cmd_stats(self, event: AstrMessageEvent):
@@ -588,25 +609,20 @@ class ChatHelperPlugin(Star):
             return
 
         mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
-        lines = [
-            f"[ChatHelper] 统计 v{VERSION}",
-            f"已分析: {self._analysis_count} 次",
-            f"错误: {self._error_count} 次",
-            "",
-            "[配置概览]",
-            f"群名单: {len(self.monitored_groups)}",
-            f"用户名单: {len(self.monitored_users)}",
-            f"被分析用户: {len(self.analysis_users)}",
-            f"群模式配置: {len(self.analysis_mode_groups)}",
-            "",
-            "[分析维度]",
-            f"意图: {'开' if self.enable_intent else '关'}",
-            f"情绪: {'开' if self.enable_emotion else '关'}",
-            f"风险: {'开' if self.enable_danger else '关'}",
-            f"建议: {'开' if self.enable_action else '关'}",
-            f"当前群模式: {mode}",
-        ]
-        yield event.plain_result("\n".join(lines))
+        body = STATS_TEMPLATE.format(
+            analysis_count=self._analysis_count,
+            error_count=self._error_count,
+            group_count=len(self.monitored_groups),
+            user_count=len(self.monitored_users),
+            analysis_user_count=len(self.analysis_users),
+            mode_group_count=len(self.analysis_mode_groups),
+            intent_status="开" if self.enable_intent else "关",
+            emotion_status="开" if self.enable_emotion else "关",
+            danger_status="开" if self.enable_danger else "关",
+            action_status="开" if self.enable_action else "关",
+            current_mode=mode,
+        )
+        yield event.plain_result(render_card(f"📈 ChatHelper 统计 v{VERSION}", body))
 
     @chat_helper_cmd.command("mode")
     async def cmd_mode(self, event: AstrMessageEvent, mode: str = ""):
@@ -623,15 +639,12 @@ class ChatHelperPlugin(Star):
 
         if mode in MODE_INSTRUCTIONS:
             self._runtime_group_modes[group_id] = mode
-            yield event.plain_result(f"[ChatHelper] 本群分析模式已切换为: {mode}")
+            yield event.plain_result(render_card("✅ 模式切换", f"本群分析模式已切换为: {mode}"))
         else:
             current = self._get_effective_analysis_mode(group_id)
             available = " / ".join(MODE_INSTRUCTIONS.keys())
-            yield event.plain_result(
-                f"[ChatHelper] 用法: /chat_helper mode <模式>\n"
-                f"可用: {available}\n"
-                f"当前: {current}"
-            )
+            body = f"用法: /chat_helper mode <模式>\n可用: {available}\n当前: {current}"
+            yield event.plain_result(render_card("ℹ️ 模式帮助", body))
 
     @chat_helper_cmd.command("analyze")
     async def cmd_analyze(self, event: AstrMessageEvent, user_id: str = "", action: str = ""):
@@ -640,10 +653,7 @@ class ChatHelperPlugin(Star):
         group_id = event.message_obj.group_id or ""
 
         if not user_id:
-            yield event.plain_result(
-                "[ChatHelper] 用法: /chat_helper analyze <用户ID> <add|remove>\n"
-                "在目标群内使用，留空群组ID则全局生效"
-            )
+            yield event.plain_result(render_card("ℹ️ 使用帮助", HELP_TEMPLATE))
             return
 
         if not self._can_manage_analysis_user(sender_id, group_id, user_id):
@@ -652,7 +662,7 @@ class ChatHelperPlugin(Star):
         if action == "add":
             self._runtime_analysis_users[group_id].add(user_id)
             self._sync_config()
-            yield event.plain_result(f"[ChatHelper] 已将 {user_id} 加入本群被分析用户")
+            yield event.plain_result(render_card("✅ 添加成功", f"已将 {user_id} 加入本群被分析用户"))
         elif action == "remove":
             self._runtime_analysis_users[group_id].discard(user_id)
             # 从配置中也移除
@@ -662,13 +672,11 @@ class ChatHelperPlugin(Star):
                 if not (e.get("group_id", "") == group_id and e.get("user_id") == user_id)
             ]
             self._sync_config()
-            yield event.plain_result(f"[ChatHelper] 已将 {user_id} 从本群被分析用户移除")
+            yield event.plain_result(render_card("✅ 移除成功", f"已将 {user_id} 从本群被分析用户移除"))
         else:
             current = "在列表中" if self._is_analysis_target(user_id, group_id) else "不在列表中"
-            yield event.plain_result(
-                f"[ChatHelper] 用户 {user_id} 当前{current}\n"
-                f"用法: /chat_helper analyze {user_id} <add|remove>"
-            )
+            body = f"用户 {user_id} 当前{current}\n用法: /chat_helper analyze {user_id} <add|remove>"
+            yield event.plain_result(render_card("ℹ️ 用户状态", body))
 
     # ================================================================
     #  生命周期

@@ -6,6 +6,21 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 新增 `templates.py` 内置模板模块，统一所有输出为现代化卡片样式
+- LLM 分析结果支持 JSON 结构化渲染，含意图/情绪/风险/建议四维展示
+- 新增 Unicode 进度条可视化（情绪强度、风险等级）
+- 新增插件图标 `logo.png`（256×256，从 azmiao.png 缩放生成）
+- `metadata.yaml` 新增 `display_name` 和 `short_desc` 字段，插件显示名改为「聊天对话分析助手」
+
+### 变更
+
+- 重构 `_format_response`，分析结果改用卡片模板渲染
+- 重构 `/chat_helper status|stats|mode|analyze` 命令输出为统一卡片样式
+- 优化系统提示词，引导 LLM 返回标准 JSON 格式（保留纯文本回退兼容）
+- 更新 README 标题为「聊天对话分析助手」
+
 ## [v1.0.0] - 2026-09-21
 
 ### 新增
