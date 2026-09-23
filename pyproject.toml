@@ -1,6 +1,6 @@
 [project]
 name = "astrbot-plugin-chat-helper"
-version = "1.0.0"
+version = "1.0.1"
 description = "AstrBot 智能聊天助手插件 - 实时分析对话意图、情绪与风险等级"
 authors = [{ name = "AZMIAO" }]
 requires-python = ">=3.10"
