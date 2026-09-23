@@ -29,14 +29,14 @@
     "description": "用户名单模式",
     "type": "string",
     "options": ["whitelist", "blacklist"],
-    "default": "whitelist",
-    "hint": "whitelist=只监控名单内的用户, blacklist=排除名单内的用户"
+    "default": "blacklist",
+    "hint": "blacklist=排除名单内的用户（推荐）, whitelist=只监控名单内的用户。⚠️ 慎用白名单模式：被分析的用户必须同时在白名单里才能被分析"
   },
   "monitored_users": {
     "description": "用户名单",
     "type": "list",
     "default": [],
-    "hint": "填写用户ID。白名单=只监控这些用户, 黑名单=排除这些用户"
+    "hint": "填写用户ID。黑名单=排除这些用户, 白名单=只监控这些用户"
   },
   "admin_users": {
     "description": "超管用户",
@@ -48,7 +48,7 @@
     "description": "被分析用户配置",
     "type": "template_list",
     "default": [],
-    "hint": "按群-用户维度设置哪些用户的消息会被分析，以及谁有权限设置",
+    "hint": "按群-用户维度设置哪些用户的消息会被分析，以及谁有权限设置。命令添加的用户会自动同步到此处",
     "templates": {
       "entry": {
         "name": "群-用户条目",
@@ -76,11 +76,18 @@
       }
     }
   },
+  "analysis_mode": {
+    "description": "默认分析模式",
+    "type": "string",
+    "options": ["quick", "standard", "detailed"],
+    "default": "standard",
+    "hint": "未按群单独设置时使用的全局默认分析模式"
+  },
   "analysis_mode_groups": {
-    "description": "分析模式配置",
+    "description": "群分析模式配置",
     "type": "template_list",
     "default": [],
-    "hint": "按群维度设置不同的分析模式，以及谁有权限设置",
+    "hint": "按群维度设置不同的分析模式，未配置的群将使用上方默认分析模式",
     "templates": {
       "entry": {
         "name": "群分析模式条目",
@@ -122,13 +129,6 @@
     "options": ["admin", "anyone"],
     "default": "admin",
     "hint": "admin=仅超管可查看分析统计和配置概览, anyone=所有用户可查看"
-  },
-  "analysis_mode": {
-    "description": "默认分析模式",
-    "type": "string",
-    "options": ["quick", "standard", "detailed"],
-    "default": "standard",
-    "hint": "未按群单独设置时的全局默认分析模式"
   },
   "enable_intent_analysis": {
     "description": "意图解读",

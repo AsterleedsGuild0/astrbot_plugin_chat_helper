@@ -217,6 +217,31 @@ class ChatHelperPlugin(Star):
         self.custom_prompt: str = self.config.get("custom_system_prompt", "")
 
     # ================================================================
+    #  配置持久化（将运行时修改同步回配置文件，供 WebUI 查看）
+    # ================================================================
+
+    def _sync_config(self):
+        """将运行时状态写回 AstrBotConfig 并保存。"""
+        try:
+            # 合并运行时添加的被分析用户到 analysis_users
+            for group_id, user_ids in self._runtime_analysis_users.items():
+                for uid in user_ids:
+                    # 检查是否已存在
+                    exists = any(
+                        e.get("group_id", "") == group_id and e.get("user_id") == uid
+                        for e in self.analysis_users
+                    )
+                    if not exists:
+                        self.analysis_users.append(
+                            {"group_id": group_id, "user_id": uid, "can_set": False}
+                        )
+
+            self.config["analysis_users"] = self.analysis_users
+            self.config.save_config()
+        except Exception as e:
+            logger.warning(f"[ChatHelper] 配置同步失败: {e}")
+
+    # ================================================================
     #  权限判断
     # ================================================================
 
@@ -544,17 +569,16 @@ class ChatHelperPlugin(Star):
             return  # 无权限时静默
 
         mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
-        txt = (
-            f"📋 聊天助手状态 (v{VERSION})\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"启用: {'✅' if self.enabled else '❌'}\n"
-            f"群监控: {self.monitor_groups_mode} ({len(self.monitored_groups)})\n"
-            f"用户监控: {self.monitor_users_mode} ({len(self.monitored_users)})\n"
-            f"分析模式: {mode} (本群)\n"
-            f"冷却时间: {self.cooldown_seconds}s\n"
-            f"回复模式: {self.response_mode}"
-        )
-        yield event.plain_result(txt)
+        lines = [
+            f"[ChatHelper] 状态 v{VERSION}",
+            f"启用: {'是' if self.enabled else '否'}",
+            f"群监控: {self.monitor_groups_mode} ({len(self.monitored_groups)})",
+            f"用户监控: {self.monitor_users_mode} ({len(self.monitored_users)})",
+            f"分析模式: {mode} (本群)",
+            f"冷却时间: {self.cooldown_seconds}s",
+            f"回复模式: {self.response_mode}",
+        ]
+        yield event.plain_result("\n".join(lines))
 
     @chat_helper_cmd.command("stats")
     async def cmd_stats(self, event: AstrMessageEvent):
@@ -564,40 +588,25 @@ class ChatHelperPlugin(Star):
             return
 
         mode = self._get_effective_analysis_mode(event.message_obj.group_id or "")
-        txt = (
-            f"📊 聊天助手统计 (v{VERSION})\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"已分析: {self._analysis_count} 次\n"
-            f"错误: {self._error_count} 次\n\n"
-            f"📂 配置概览\n"
-            f"群名单: {len(self.monitored_groups)} | "
-            f"用户名单: {len(self.monitored_users)} | "
-            f"被分析用户配置: {len(self.analysis_users)} | "
-            f"群模式配置: {len(self.analysis_mode_groups)}\n\n"
-            f"🔍 分析维度\n"
-            f"意图 {'✅' if self.enable_intent else '❌'} | "
-            f"情绪 {'✅' if self.enable_emotion else '❌'} | "
-            f"风险 {'✅' if self.enable_danger else '❌'} | "
-            f"建议 {'✅' if self.enable_action else '❌'}\n\n"
-            f"当前群分析模式: {mode}"
-        )
-        yield event.plain_result(txt)
-
-    @chat_helper_cmd.command("on")
-    async def cmd_on(self, event: AstrMessageEvent):
-        """启用插件（仅超管）"""
-        if not _is_admin(event.get_sender_id(), self.admin_users):
-            return
-        self.enabled = True
-        yield event.plain_result("✅ 聊天助手已启用")
-
-    @chat_helper_cmd.command("off")
-    async def cmd_off(self, event: AstrMessageEvent):
-        """禁用插件（仅超管）"""
-        if not _is_admin(event.get_sender_id(), self.admin_users):
-            return
-        self.enabled = False
-        yield event.plain_result("❌ 聊天助手已禁用")
+        lines = [
+            f"[ChatHelper] 统计 v{VERSION}",
+            f"已分析: {self._analysis_count} 次",
+            f"错误: {self._error_count} 次",
+            "",
+            "[配置概览]",
+            f"群名单: {len(self.monitored_groups)}",
+            f"用户名单: {len(self.monitored_users)}",
+            f"被分析用户: {len(self.analysis_users)}",
+            f"群模式配置: {len(self.analysis_mode_groups)}",
+            "",
+            "[分析维度]",
+            f"意图: {'开' if self.enable_intent else '关'}",
+            f"情绪: {'开' if self.enable_emotion else '关'}",
+            f"风险: {'开' if self.enable_danger else '关'}",
+            f"建议: {'开' if self.enable_action else '关'}",
+            f"当前群模式: {mode}",
+        ]
+        yield event.plain_result("\n".join(lines))
 
     @chat_helper_cmd.command("mode")
     async def cmd_mode(self, event: AstrMessageEvent, mode: str = ""):
@@ -606,7 +615,7 @@ class ChatHelperPlugin(Star):
         group_id = event.message_obj.group_id or ""
 
         if not group_id:
-            yield event.plain_result("⚠️ 此命令仅在群聊中可用")
+            yield event.plain_result("[ChatHelper] 此命令仅在群聊中可用")
             return
 
         if not self._can_set_group_mode(sender_id, group_id):
@@ -614,25 +623,25 @@ class ChatHelperPlugin(Star):
 
         if mode in MODE_INSTRUCTIONS:
             self._runtime_group_modes[group_id] = mode
-            yield event.plain_result(f"✅ 本群分析模式已切换为: {mode}")
+            yield event.plain_result(f"[ChatHelper] 本群分析模式已切换为: {mode}")
         else:
             current = self._get_effective_analysis_mode(group_id)
             available = " / ".join(MODE_INSTRUCTIONS.keys())
             yield event.plain_result(
-                f"用法: /chat_helper mode <模式>\n"
+                f"[ChatHelper] 用法: /chat_helper mode <模式>\n"
                 f"可用: {available}\n"
                 f"当前: {current}"
             )
 
     @chat_helper_cmd.command("analyze")
     async def cmd_analyze(self, event: AstrMessageEvent, user_id: str = "", action: str = ""):
-        """设置被分析用户（添加/移除）"""
+        """设置被分析用户（添加/移除），修改会自动同步到 WebUI 配置"""
         sender_id = event.get_sender_id()
         group_id = event.message_obj.group_id or ""
 
         if not user_id:
             yield event.plain_result(
-                "用法: /chat_helper analyze <用户ID> <add|remove>\n"
+                "[ChatHelper] 用法: /chat_helper analyze <用户ID> <add|remove>\n"
                 "在目标群内使用，留空群组ID则全局生效"
             )
             return
@@ -642,14 +651,22 @@ class ChatHelperPlugin(Star):
 
         if action == "add":
             self._runtime_analysis_users[group_id].add(user_id)
-            yield event.plain_result(f"✅ 已将 {user_id} 加入本群被分析用户")
+            self._sync_config()
+            yield event.plain_result(f"[ChatHelper] 已将 {user_id} 加入本群被分析用户")
         elif action == "remove":
             self._runtime_analysis_users[group_id].discard(user_id)
-            yield event.plain_result(f"✅ 已将 {user_id} 从本群被分析用户移除")
+            # 从配置中也移除
+            self.analysis_users[:] = [
+                e
+                for e in self.analysis_users
+                if not (e.get("group_id", "") == group_id and e.get("user_id") == user_id)
+            ]
+            self._sync_config()
+            yield event.plain_result(f"[ChatHelper] 已将 {user_id} 从本群被分析用户移除")
         else:
             current = "在列表中" if self._is_analysis_target(user_id, group_id) else "不在列表中"
             yield event.plain_result(
-                f"用户 {user_id} 当前{current}\n"
+                f"[ChatHelper] 用户 {user_id} 当前{current}\n"
                 f"用法: /chat_helper analyze {user_id} <add|remove>"
             )
 
