@@ -21,7 +21,6 @@ DIST_DIR = ROOT / "dist"
 # 需要打入 zip 的根级文件
 PACKAGE_ROOT_FILES = [
     "main.py",
-    "templates.py",
     "metadata.yaml",
     "_conf_schema.json",
     "requirements.txt",
