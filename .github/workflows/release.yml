@@ -202,6 +202,19 @@ jobs:
           test -s "$plugin_zip"
           echo "PLUGIN_ZIP=$plugin_zip" >> "$GITHUB_ENV"
 
+      - name: Delete existing release if any
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          set -euo pipefail
+          release_id="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG" --jq '.id' 2>/dev/null || true)"
+          if [[ -n "$release_id" && "$release_id" != "null" ]]; then
+            echo "Deleting existing release $release_id for tag $TAG"
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$release_id"
+          fi
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -211,4 +224,3 @@ jobs:
           files: ${{ env.PLUGIN_ZIP }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(needs.metadata.outputs.tag, '-') }}
           fail_on_unmatched_files: false
-          overwrite_files: true
