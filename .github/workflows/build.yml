@@ -34,16 +34,16 @@ jobs:
       - name: Build dev package
         run: python scripts/package_plugin.py --dev-version
 
-      - name: Resolve dev package path
+      - name: Extract dev package
         id: dev_package
         shell: bash
         run: |
           PACKAGE_PATH=$(ls dist/astrbot_plugin_chat_helper-*-test.*.zip | head -1)
           test -f "$PACKAGE_PATH"
-          BASENAME=$(basename "$PACKAGE_PATH")
-          mv "$PACKAGE_PATH" "./$BASENAME"
+          BASENAME=$(basename "$PACKAGE_PATH" .zip)
+          unzip -q "$PACKAGE_PATH" -d "./$BASENAME"
           echo "path=./$BASENAME" >> "$GITHUB_OUTPUT"
-          echo "name=${BASENAME%.zip}" >> "$GITHUB_OUTPUT"
+          echo "name=$BASENAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload dev package artifact
         uses: actions/upload-artifact@v4

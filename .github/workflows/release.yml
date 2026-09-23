@@ -89,9 +89,10 @@ jobs:
         run: |
           PACKAGE_PATH="dist/astrbot_plugin_chat_helper-${{ steps.version.outputs.version }}.zip"
           test -f "$PACKAGE_PATH"
-          BASENAME=$(basename "$PACKAGE_PATH")
-          mv "$PACKAGE_PATH" "./$BASENAME"
+          BASENAME=$(basename "$PACKAGE_PATH" .zip)
+          unzip -q "$PACKAGE_PATH" -d "./$BASENAME"
           echo "path=./$BASENAME" >> "$GITHUB_OUTPUT"
+          echo "zip_path=$PACKAGE_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
@@ -106,5 +107,5 @@ jobs:
           tag_name: ${{ steps.version.outputs.version }}
           name: astrbot_plugin_chat_helper ${{ steps.version.outputs.version }}
           body_path: release-notes.md
-          files: ${{ steps.package.outputs.path }}
+          files: ${{ steps.package.outputs.zip_path }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(steps.version.outputs.version, '-') }}
