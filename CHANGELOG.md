@@ -1,42 +1,50 @@
-# 更新日志
+## 未发布
 
-本项目的所有重要变更都将记录在此文件中。
+### ✨ 新功能
 
-格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+- 对话分析结果改用 HTML 图片渲染，修复 template_list 配置格式 @azmiao
+- 添加插件图标与中文显示名「聊天对话分析助手」 @azmiao
+- 新增模板渲染模块，统一现代化卡片样式输出 @azmiao
+- 实现智能聊天助手插件核心功能 @azmiao
 
-## [Unreleased]
+### 🐛 Bug 修复
 
-### 新增
+- 修复 release 版本校验时 v 前缀不一致导致的比较失败 @azmiao
+- 修复 html_render 调用方式，直接传模板字符串和数据而非自行渲染 @azmiao
+- 转义 SYSTEM_PROMPT_TEMPLATE 中的 JSON 花括号，修复 KeyError @azmiao
+- 清理残留的 render_card 调用，修复 NameError @azmiao
+- 修复 template_list 配置格式导致 WebUI 无法识别 @azmiao
+- 合并 templates.py 到 main.py，修复 AstrBot 插件加载 ModuleNotFoundError @azmiao
+- 修复 generate_changelog.py import 排序问题 @azmiao
 
-- 新增 `templates.py` 内置模板模块，统一所有输出为现代化卡片样式
-- LLM 分析结果支持 JSON 结构化渲染，含意图/情绪/风险/建议四维展示
-- 新增 Unicode 进度条可视化（情绪强度、风险等级）
-- 新增插件图标 `logo.png`（256×256，从 azmiao.png 缩放生成）
-- `metadata.yaml` 新增 `display_name` 和 `short_desc` 字段，插件显示名改为「聊天对话分析助手」
+### 🎨 代码重构
 
-### 变更
+- 优化权限配置和命令交互 @azmiao
+- 重构权限体系与配置结构 @azmiao
 
-- 重构 `_format_response`，分析结果改用卡片模板渲染
-- 重构 `/chat_helper status|stats|mode|analyze` 命令输出为统一卡片样式
-- 优化系统提示词，引导 LLM 返回标准 JSON 格式（保留纯文本回退兼容）
-- 更新 README 标题为「聊天对话分析助手」
+### 📚 文档
 
-## [v1.0.0] - 2026-09-21
+- 更新 README，移除超管指令和 tests 引用，更新效果示例说明 @azmiao
+- 补充完整 README 使用文档 @azmiao
 
-### 新增
+### 🧪 测试
 
-- 实现智能对话分析核心功能，监听群聊/私聊消息并调用 LLM 分析意图、情绪与风险
-- 支持白名单/黑名单/全量三种监控模式，可指定群组和用户
-- 4 个独立分析维度：意图解读、情绪检测、风险评估、行动建议
-- 3 种分析深度模式：quick / standard / detailed
-- 冷却机制防止 LLM 过度调用，支持可配置间隔
-- 支持会话内回复（reply）和私聊回复（private）两种模式
-- 自定义系统提示词追加能力
-- 16 项 WebUI 可配置项（_conf_schema.json）
-- 指令组 `/chat_helper status|on|off|mode` 用于运行时控制
-- 添加 GitHub Actions 自动打包发布工作流
-- 添加 changelog 自动生成与提取工具脚本
-- 添加 AstrBot 插件打包脚本
+- 添加 VSCode 启动配置和单元测试 @azmiao
 
-[Unreleased]: https://github.com/azmiao/astrbot_plugin_chat_helper/compare/v1.0.0...HEAD
-[v1.0.0]: https://github.com/azmiao/astrbot_plugin_chat_helper/releases/tag/v1.0.0
+### ⚙️ 持续集成
+
+- 修复 artifact 嵌套 zip，上传解压后的插件目录 @azmiao
+- 修复 artifact 嵌套 zip 问题，上传前将包移到根目录 @azmiao
+- build workflow 改为 push 触发，release 保持 tag 触发 @azmiao
+- 拆分手动打包为独立 workflow @azmiao
+- 添加手动触发仅打包工作流 @azmiao
+
+### 🧹 日常维护
+
+- 优化CHANGELOG生成逻辑 @azmiao
+- 移除 tests 目录并停止 git 跟踪 @azmiao
+- 添加 CI/CD 自动化发布基础设施 @azmiao
+
+### 其他变更
+
+- Initial commit @azmiao

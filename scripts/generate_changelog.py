@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""基于 git 提交记录生成和提取 Keep a Changelog 格式的版本日志。"""
+"""根据正式版本标签生成项目 Changelog。"""
 
 from __future__ import annotations
 
@@ -8,104 +7,96 @@ import json
 import re
 import subprocess
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CHANGELOG = ROOT / "CHANGELOG.md"
 
-CATEGORY_ORDER = (
-    "新增", "变更", "弃用", "移除", "修复", "安全", "文档", "测试", "内部", "其他",
+VERSION_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+# type 与 emoji 之间的空格可有可无（\s*），同时兼容 "feat ✨:" 旧格式与 "feat✨:" 新格式
+COMMIT_PATTERN = re.compile(
+    r"^(?P<type>[A-Za-z]+)(?:\s*[^\w\s:(]+)?"
+    r"(?:\((?P<scope>[^)]+)\))?\s*:\s*(?P<message>.+)$"
 )
-
 GITHUB_NOREPLY_PATTERN = re.compile(
     r"^(?:\d+\+)?(?P<username>[^@]+)@users\.noreply\.github\.com$",
     re.IGNORECASE,
 )
-DEFAULT_NICKNAME_MAP_PATH = ROOT / ".vscode" / "git-nickname-username.json"
+DEFAULT_NICKNAME_MAP_PATH = Path(".vscode/git-nickname-username.json")
 
-ISSUE_PATTERN = re.compile(r"(?<![\w/])#(\d+)\b")
-HEADING_PATTERN = re.compile(
-    r"^##[ \t]+(?:\[(?P<bracketed>[^]\n]+)\]|(?P<plain>\S+))"
-    r"(?:[ \t]+-[ \t]+[^\n]+)?[ \t]*$",
-    re.MULTILINE,
-)
-LINK_REFERENCE_PATTERN = re.compile(r"^\[[^]\n]+\]:\s+\S+", re.MULTILINE)
-LINK_DEFINITION_PATTERN = re.compile(
-    r"^\[(?P<label>[^]\n]+)\]:[ \t]+(?P<url>\S+)[ \t]*$", re.MULTILINE
-)
-FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})")
-IMAGE_PATTERN = re.compile(r"!\[[^]\n]*\](?:\([^\n)]*\)|\[[^]\n]*\])?")
+CATEGORY_BY_TYPE = {
+    "feat": "✨ 新功能",
+    "fix": "🐛 Bug 修复",
+    "patch": "🐛 Bug 修复",
+    "perf": "🚀 性能优化",
+    "refactor": "🎨 代码重构",
+    "docs": "📚 文档",
+    "deps": "🧩 依赖变更",
+    "build": "🧩 依赖变更",
+    "test": "🧪 测试",
+    "ci": "⚙️ 持续集成",
+    "chore": "🧹 日常维护",
+    "style": "🧹 日常维护",
+    "format": "🧹 日常维护",
+    "config": "🧹 日常维护",
+}
+CATEGORY_ORDER = tuple(dict.fromkeys(CATEGORY_BY_TYPE.values())) + ("其他变更",)
 
 
 @dataclass(frozen=True)
 class Commit:
     subject: str
-    body: str = ""
-    author_name: str = ""
-    author_email: str = ""
+    author_name: str
+    author_email: str
+    category: str
 
 
-def classify_commit(subject: str) -> str:
-    """将 Conventional Commit 类型和 gitmoji 映射到 changelog 分类。"""
-    lowered = subject.casefold().lstrip()
-    conventional = re.match(r"([a-z]+)(?:\([^)]*\))?!?[^:\w]*:", lowered)
-    commit_type = conventional.group(1) if conventional else ""
-
-    rules = (
-        ("安全", {"security"}, ("🔒", "🔐")),
-        ("修复", {"fix", "bugfix", "hotfix"}, ("🐛", "🚑", "🩹")),
-        ("移除", {"remove"}, ("🔥", "➖")),
-        ("弃用", {"deprecate"}, ("🗑️",)),
-        ("新增", {"feat", "feature"}, ("✨", "🎉", "➕")),
-        ("文档", {"docs", "doc"}, ("📝",)),
-        ("测试", {"test"}, ("✅", "🧪")),
-        ("内部", {"chore", "build", "ci", "release"}, ("🔧", "💚", "📦", "🏗️")),
-        ("变更", {"refactor", "perf", "style"}, ("♻️", "⚡", "🎨")),
+def run_git(*args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
     )
-    for category, types, emojis in rules:
-        if commit_type in types or any(emoji in subject for emoji in emojis):
-            return category
-    return "其他"
+    return result.stdout
 
 
-def extract_issue_references(text: str) -> list[str]:
-    return list(dict.fromkeys(f"#{n}" for n in ISSUE_PATTERN.findall(text)))
+def parse_version_tag(tag: str) -> tuple[int, int, int] | None:
+    match = VERSION_TAG_PATTERN.fullmatch(tag)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
-def clean_subject(subject: str) -> str:
-    """移除 Conventional Commit 前缀和首尾 gitmoji。"""
-    cleaned = re.sub(r"^[a-zA-Z]+(?:\([^)]*\))?!?[^:\w]*:\s*", "", subject).strip()
-    emoji_tokens = "✨🐛🚑🩹🔥➖🗑️🎉➕📝🔒🔐🚀🖼️🔧♻️⚡️⚡✅🧪💚⬆️⬇️📦🏗️🎨"
-    cleaned = cleaned.strip(emoji_tokens + " ")
-    cleaned = re.sub(r"^[a-zA-Z]+\s*:\s*", "", cleaned).strip()
-    return cleaned or subject.strip()
+def get_release_tags() -> list[str]:
+    tags = [line.strip() for line in run_git("tag", "--list").splitlines()]
+    versions = [
+        (version, tag)
+        for tag in tags
+        if (version := parse_version_tag(tag)) is not None
+    ]
+    return [tag for _, tag in sorted(versions, reverse=True)]
 
 
-def parse_git_log(output: str) -> list[Commit]:
-    commits: list[Commit] = []
-    for record in output.split("\x1e"):
-        record = record.strip("\n")
-        if not record:
-            continue
-        fields = record.split("\x1f", 4)
-        if len(fields) != 5:
-            raise ValueError("Unexpected git log record")
-        _hash, subject, body, author_name, author_email = fields
-        commits.append(Commit(
-            subject=subject.strip(),
-            body=body.strip(),
-            author_name=author_name.strip(),
-            author_email=author_email.strip(),
-        ))
-    return commits
+def get_previous_tag(tag: str, tags: list[str]) -> str | None:
+    index = tags.index(tag)
+    return tags[index + 1] if index + 1 < len(tags) else None
 
 
-def load_nickname_map(path: Path | None = None) -> dict[str, str]:
-    """加载 Git 昵称 → GitHub 用户名映射表。"""
-    if path is None:
-        path = DEFAULT_NICKNAME_MAP_PATH
+def read_commit_records(tag: str, previous_tag: str | None) -> list[str]:
+    revision = f"{previous_tag}..{tag}" if previous_tag else tag
+    output = run_git(
+        "log",
+        "--no-merges",
+        "--format=%an%x1f%ae%x1f%s%x1e",
+        revision,
+    )
+    return [record.strip() for record in output.split("\x1e") if record.strip()]
+
+
+def load_nickname_map(path: Path = DEFAULT_NICKNAME_MAP_PATH) -> dict[str, str]:
     if not path.exists():
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -118,258 +109,113 @@ def load_nickname_map(path: Path | None = None) -> dict[str, str]:
     }
 
 
-def format_author(author_name: str, author_email: str, nickname_map: dict[str, str]) -> str:
-    """格式化作者显示：优先查映射表 → 从 GitHub noreply 邮箱提取 → 原始昵称。"""
-    mapped = nickname_map.get(author_name.strip())
-    if mapped:
-        return f"@{mapped}"
-    match = GITHUB_NOREPLY_PATTERN.fullmatch(author_email.strip())
-    if match:
-        return f"@{match.group('username')}"
-    return author_name.strip()
+def format_author(name: str, email: str, nickname_map: dict[str, str]) -> str:
+    mapped_username = nickname_map.get(name.strip())
+    if mapped_username:
+        return f"@{mapped_username}"
+    match = GITHUB_NOREPLY_PATTERN.fullmatch(email.strip())
+    return f"@{match.group('username')}" if match else name.strip()
 
 
-def read_commits(from_ref: str | None, to_ref: str) -> list[Commit]:
-    revision = f"{from_ref}..{to_ref}" if from_ref else to_ref
-    result = subprocess.run(
-        ["git", "log", "--format=%H%x1f%s%x1f%b%x1f%an%x1f%ae%x1e", revision],
-        cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8",
-    )
-    return parse_git_log(result.stdout)
+def parse_commit_record(record: str) -> Commit:
+    fields = record.split("\x1f", maxsplit=2)
+    if len(fields) != 3:
+        raise ValueError("Git 提交记录格式损坏")
+
+    author_name, author_email, raw_subject = (field.strip() for field in fields)
+    match = COMMIT_PATTERN.fullmatch(raw_subject)
+    if not match:
+        return Commit(raw_subject, author_name, author_email, "其他变更")
+
+    commit_type = match.group("type").lower()
+    scope = match.group("scope")
+    message = match.group("message").strip()
+    subject = f"*({scope})* {message}" if scope else message
+    category = CATEGORY_BY_TYPE.get(commit_type, "其他变更")
+    return Commit(subject, author_name, author_email, category)
 
 
-def generate_section(
-    version: str,
-    release_date: str,
-    commits: list[Commit],
-    show_author: bool = True,
-    nickname_map: dict[str, str] | None = None,
-) -> str:
-    if not commits:
-        raise ValueError("No commits found for the requested revision range")
+def render_version(tag: str, tags: list[str], nickname_map: dict[str, str]) -> str:
+    if parse_version_tag(tag) is None:
+        raise ValueError(f"不是正式版本标签：{tag}")
+    if tag not in tags:
+        raise ValueError(f"正式版本标签不存在：{tag}")
 
-    if nickname_map is None:
-        nickname_map = load_nickname_map()
-
-    grouped: dict[str, list[str]] = {cat: [] for cat in CATEGORY_ORDER}
+    run_git("rev-parse", "--verify", f"refs/tags/{tag}")
+    previous_tag = get_previous_tag(tag, tags)
+    commits = [parse_commit_record(record) for record in read_commit_records(tag, previous_tag)]
+    grouped: dict[str, list[Commit]] = defaultdict(list)
     for commit in commits:
-        category = classify_commit(commit.subject)
-        description = clean_subject(commit.subject)
-        refs = extract_issue_references(f"{commit.subject}\n{commit.body}")
-        if refs and not extract_issue_references(description):
-            description = f"{description}（{', '.join(refs)}）"
-        if show_author and (commit.author_name or commit.author_email):
-            author = format_author(commit.author_name, commit.author_email, nickname_map)
-            description = f"{description}（{author}）"
-        grouped[category].append(f"- {description}")
+        grouped[commit.category].append(commit)
 
-    lines = [f"## [{version}] - {release_date}"]
+    date = run_git("log", "-1", "--format=%cs", tag).strip()
+    lines = [f"## {tag.removeprefix('v')} ({date})"]
     for category in CATEGORY_ORDER:
-        entries = grouped[category]
-        if entries:
-            lines.extend(("", f"### {category}", "", *entries))
+        category_commits = grouped.get(category)
+        if not category_commits:
+            continue
+        lines.extend(("", f"### {category}", ""))
+        lines.extend(
+            f"- {commit.subject} {format_author(commit.author_name, commit.author_email, nickname_map)}"
+            for commit in category_commits
+        )
     return "\n".join(lines) + "\n"
 
 
-def find_section(text: str, version: str) -> tuple[int, int, str]:
-    matches = list(HEADING_PATTERN.finditer(text))
-    for index, match in enumerate(matches):
-        heading_version = match.group("bracketed") or match.group("plain")
-        if heading_version != version:
+def render_unreleased(nickname_map: dict[str, str]) -> str:
+    """无 tag 时，将 HEAD 视为未发布版本，范围为全部提交。"""
+    commits = [parse_commit_record(record) for record in read_commit_records("HEAD", None)]
+    grouped: dict[str, list[Commit]] = defaultdict(list)
+    for commit in commits:
+        grouped[commit.category].append(commit)
+
+    lines = ["## 未发布"]
+    for category in CATEGORY_ORDER:
+        category_commits = grouped.get(category)
+        if not category_commits:
             continue
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        link_ref = LINK_REFERENCE_PATTERN.search(text, match.end(), end)
-        if link_ref:
-            end = link_ref.start()
-        body = text[match.end():end].strip()
-        if not body:
-            raise ValueError(f"Changelog section {version!r} is empty")
-        return match.start(), end, body
-    raise ValueError(f"Changelog section {version!r} was not found")
-
-
-def mask_markdown_code(text: str) -> str:
-    def mask(value: str) -> str:
-        return "".join(c if c in "\r\n" else " " for c in value)
-
-    fenced_parts: list[str] = []
-    fence_char: str | None = None
-    fence_len = 0
-    for line in text.splitlines(keepends=True):
-        content = line.rstrip("\r\n")
-        if fence_char is not None:
-            fenced_parts.append(mask(line))
-            closing = re.fullmatch(rf" {{0,3}}{re.escape(fence_char)}{{{fence_len},}}[ \t]*", content)
-            if closing:
-                fence_char = None
-                fence_len = 0
-            continue
-        opening = FENCE_OPEN_PATTERN.match(content)
-        if opening:
-            fence = opening.group("fence")
-            fence_char = fence[0]
-            fence_len = len(fence)
-            fenced_parts.append(mask(line))
-        else:
-            fenced_parts.append(line)
-
-    masked = "".join(fenced_parts)
-    chars = list(masked)
-    runs = list(re.finditer(r"`+", masked))
-    i = 0
-    while i < len(runs):
-        opening = runs[i]
-        closing_idx = next(
-            (j for j in range(i + 1, len(runs)) if len(runs[j].group(0)) == len(opening.group(0))),
-            None,
+        lines.extend(("", f"### {category}", ""))
+        lines.extend(
+            f"- {commit.subject} {format_author(commit.author_name, commit.author_email, nickname_map)}"
+            for commit in category_commits
         )
-        if closing_idx is None:
-            i += 1
-            continue
-        closing = runs[closing_idx]
-        for idx in range(opening.start(), closing.end()):
-            if chars[idx] not in "\r\n":
-                chars[idx] = " "
-        i = closing_idx + 1
-    return "".join(chars)
+    return "\n".join(lines) + "\n"
 
 
-def append_referenced_link_definitions(text: str, body: str) -> str:
-    ref_text = mask_markdown_code(body)
-    ref_text = IMAGE_PATTERN.sub(lambda m: " " * len(m.group(0)), ref_text)
-    definitions: list[str] = []
-    for match in LINK_DEFINITION_PATTERN.finditer(text):
-        label = re.escape(match.group("label"))
-        reference = re.compile(rf"(?<!\!)\[{label}\](?:\[\]|(?![\[(]))", re.IGNORECASE)
-        if reference.search(ref_text):
-            definitions.append(match.group(0))
-    if not definitions:
-        return body
-    return f"{body}\n\n{'chr(10)'.join(definitions)}"
+def render_changelog(tags: list[str], nickname_map: dict[str, str]) -> str:
+    if not tags:
+        return render_unreleased(nickname_map)
+    sections = [render_version(tag, tags, nickname_map).rstrip() for tag in tags]
+    return "# 更新日志\n\n" + "\n\n".join(sections) + "\n"
 
 
-def write_section(
-    changelog_path: Path, version: str, section: str, from_ref: str | None = None
-) -> None:
-    text = changelog_path.read_text(encoding="utf-8")
-    matches = list(HEADING_PATTERN.finditer(text))
-    if any((m.group("bracketed") or m.group("plain")) == version for m in matches):
-        raise ValueError(f"Changelog section {version!r} already exists")
-
-    link_defs = list(LINK_DEFINITION_PATTERN.finditer(text))
-    if any(m.group("label") == version for m in link_defs):
-        raise ValueError(f"Changelog link {version!r} already exists")
-
-    unreleased_links = [m for m in link_defs if m.group("label") == "Unreleased"]
-    if len(unreleased_links) != 1:
-        raise ValueError("Changelog must contain exactly one [Unreleased] link")
-
-    unrel = unreleased_links[0]
-    repo_match = re.fullmatch(r"(?P<base>.+)/compare/.+\.\.\.HEAD", unrel.group("url"))
-    if not repo_match:
-        raise ValueError("Cannot derive repository URL from [Unreleased] link")
-    repo_url = repo_match.group("base")
-
-    new_unreleased = f"[Unreleased]: {repo_url}/compare/{version}...HEAD"
-    version_url = f"{repo_url}/compare/{from_ref}...{version}" if from_ref else f"{repo_url}/releases/tag/{version}"
-    new_version_link = f"[{version}]: {version_url}"
-    text = text[:unrel.start()] + new_unreleased + "\n" + new_version_link + text[unrel.end():]
-
-    matches = list(HEADING_PATTERN.finditer(text))
-    for index, match in enumerate(matches):
-        if (match.group("bracketed") or match.group("plain")) != "Unreleased":
-            continue
-        if index + 1 < len(matches):
-            insert_at = matches[index + 1].start()
-        else:
-            link_ref = LINK_REFERENCE_PATTERN.search(text, match.end())
-            insert_at = link_ref.start() if link_ref else len(text)
-        before = text[:match.end()].rstrip()
-        after = text[insert_at:].lstrip()
-        updated = f"{before}\n\n{section.strip()}\n\n{after}"
-        changelog_path.write_text(updated.rstrip() + "\n", encoding="utf-8")
-        return
-    raise ValueError("Changelog section 'Unreleased' was not found")
-
-
-def command_generate(args: argparse.Namespace) -> int:
-    commits = read_commits(args.from_ref, args.to_ref)
-    nickname_map = load_nickname_map()
-    section = generate_section(
-        args.version, args.date, commits,
-        show_author=args.show_author, nickname_map=nickname_map,
-    )
-    if args.write:
-        write_section(args.changelog, args.version, section, args.from_ref)
-    elif args.output:
-        args.output.write_text(section, encoding="utf-8")
-    else:
-        sys.stdout.write(section)
-    return 0
-
-
-def command_extract(args: argparse.Namespace) -> int:
-    text = args.changelog.read_text(encoding="utf-8")
-    _start, _end, body = find_section(text, args.version)
-    body = append_referenced_link_definitions(text, body)
-    output = body + "\n"
-    if args.output:
-        args.output.write_text(output, encoding="utf-8")
-    else:
-        sys.stdout.write(output)
-    return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    gen = subparsers.add_parser("generate", help="Generate a version section")
-    gen.add_argument("version_positional", nargs="?", metavar="VERSION")
-    gen.add_argument("--version", dest="version_option")
-    gen.add_argument("--from-ref")
-    gen.add_argument("--to-ref", default="HEAD")
-    gen.add_argument("--date", default=date.today().isoformat())
-    gen.add_argument("--changelog", type=Path, default=DEFAULT_CHANGELOG)
-    gen.add_argument(
-        "--no-author",
-        dest="show_author",
-        action="store_false",
-        help="不在条目后附加提交作者（默认附加 @作者）",
-    )
-    gen_out = gen.add_mutually_exclusive_group()
-    gen_out.add_argument("--write", action="store_true")
-    gen_out.add_argument("--output", type=Path)
-    gen.set_defaults(handler=command_generate)
-
-    ext = subparsers.add_parser("extract", help="Extract one exact version section")
-    ext.add_argument("version_positional", nargs="?", metavar="VERSION")
-    ext.add_argument("--version", dest="version_option")
-    ext.add_argument("--changelog", type=Path, default=DEFAULT_CHANGELOG)
-    ext.add_argument("--output", type=Path)
-    ext.set_defaults(handler=command_extract)
-
-    return parser
-
-
-def resolve_version(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    positional = args.version_positional
-    option = args.version_option
-    if positional and option:
-        parser.error("VERSION and --version cannot be used together")
-    if not positional and not option:
-        parser.error("a version is required: provide VERSION or --version")
-    args.version = positional or option
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="根据正式版本标签生成项目 Changelog")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--tag", help="只生成指定正式版本的发布说明")
+    mode.add_argument("--all", action="store_true", help="生成全部正式版本的 Changelog")
+    parser.add_argument("--output", type=Path, help="将结果写入指定文件")
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    resolve_version(parser, args)
+    args = parse_args(argv)
     try:
-        return args.handler(args)
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        tags = get_release_tags()
+        nickname_map = load_nickname_map()
+        content = (
+            render_changelog(tags, nickname_map)
+            if args.all
+            else render_version(args.tag, tags, nickname_map)
+        )
+        if args.output:
+            args.output.write_text(content, encoding="utf-8", newline="\n")
+        else:
+            sys.stdout.buffer.write(content.encode("utf-8"))
+        return 0
+    except (subprocess.CalledProcessError, ValueError, OSError) as error:
+        detail = error.stderr.strip() if isinstance(error, subprocess.CalledProcessError) else str(error)
+        print(f"生成 Changelog 失败：{detail}", file=sys.stderr)
         return 1
 
 
