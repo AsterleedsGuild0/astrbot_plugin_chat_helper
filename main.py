@@ -335,8 +335,19 @@ MODE_INSTRUCTIONS = {
 
 
 def _parse_permission_list(config: AstrBotConfig, key: str) -> list[dict]:
-    """从配置解析 template_list 为 dict 列表。"""
+    """从配置解析 template_list 为 dict 列表。
+
+    template_list 在配置中的存储格式为 {"entry": [...]}，
+    需要提取 entry 键对应的列表。
+    """
     raw = config.get(key, [])
+    # 处理 {"entry": [...]} 格式
+    if isinstance(raw, dict):
+        entries = raw.get("entry", [])
+        if isinstance(entries, list):
+            return entries
+        return []
+    # 兼容直接是列表的情况
     if isinstance(raw, list):
         return raw
     return []
@@ -481,7 +492,8 @@ class ChatHelperPlugin(Star):
                             {"group_id": group_id, "user_id": uid, "can_set": False}
                         )
 
-            self.config["analysis_users"] = self.analysis_users
+            # template_list 类型需要按 {"entry": [...]} 格式写入
+            self.config["analysis_users"] = {"entry": self.analysis_users}
             self.config.save_config()
         except Exception as e:
             logger.warning(f"[ChatHelper] 配置同步失败: {e}")
