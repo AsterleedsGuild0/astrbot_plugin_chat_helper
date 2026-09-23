@@ -12,6 +12,7 @@
 
 ### 🐛 Bug 修复
 
+- 禁止 branch push 触发 release workflow，避免 changelog commit 产生竞争 @azmiao
 - 发布前删除残留 release，避免 tag 重打导致 422 冲突 @azmiao
 - release 发布时覆盖已有文件，避免 tag 重打导致冲突 @azmiao
 - release artifact 同时上传 zip 文件，修复发布时找不到包 @azmiao
@@ -50,6 +51,7 @@
 
 ### 🧹 日常维护
 
+- 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
 - 更新 CHANGELOG @github-actions[bot]
